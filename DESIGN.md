@@ -27,6 +27,7 @@ Cosight 애플리케이션은 다음 기술 스택으로 개발한다. 이 항�
 - **그래프 렌더링 및 탐색:** Cytoscape.js
 - **그래프 자동 배치:** ELK의 JavaScript 배포판인 elkjs
 - **그래프-레이아웃 연결:** cytoscape-elk
+- **통계 차트:** Apache ECharts + vue-echarts
 - **역할:** 프로젝트 탐색기, 코드 및 그래프 시각화, 분석 조건 입력, 결과 상세 표시, 탐색 상태 관리
 
 ### 구현 원칙
@@ -35,6 +36,7 @@ Cosight 애플리케이션은 다음 기술 스택으로 개발한다. 이 항�
 - 공통 UI 요소는 Naive UI 컴포넌트를 우선 사용하고, 제품 고유의 레이아웃과 시각화 스타일은 SCSS로 관리한다.
 - 코드 표시와 탐색은 Monaco Editor를 직접 감싼 Vue 컴포넌트로 구현한다.
 - 그래프 렌더링과 기본 상호작용은 Cytoscape.js를 사용하고 계층형 자동 배치는 elkjs를 사용한다.
+- 언어·노드·관계·경고 집계는 Apache ECharts로 표시하고 동일 데이터를 접근 가능한 표로도 제공한다.
 - 점진적 펼치기, 경로 고정, 집중 보기, 분석 모드, 신뢰도와 근거 표현은 Cosight의 제품 로직으로 구현한다.
 - 프런트엔드와 백엔드는 명시적인 API 계약으로 분리한다.
 - Gin 핸들러에는 비즈니스 로직을 직접 두지 않고 서비스 및 분석 계층으로 분리한다.
@@ -1160,7 +1162,7 @@ flowchart LR
     AST --> Symbol[심볼·스코프·타입 분석]
     Symbol --> Ref[정의·참조·호출 분석]
     Ref --> Flow[제어·데이터·오류 흐름]
-    Flow --> Framework[Go·Gin·Vue·PostgreSQL 분석]
+    Flow --> Framework[Go·Gin·TypeScript·Vue 분석]
     Framework --> Link[API·DB·테스트 연결]
     Link --> Graph[통합 코드 그래프]
     Git[Git 변경] --> Graph
@@ -1525,7 +1527,9 @@ ProjectDetail.vue
 
 경로 파라미터 이름이 다르더라도 URL 구조와 타입을 정규화해 비교한다.
 
-### 12.18 PostgreSQL과 SQL 분석
+### 12.18 PostgreSQL과 SQL 분석(후속 범위)
+
+이 절은 MVP 이후 확장 방향이다. MVP의 의미 분석 대상은 Go, TypeScript와 Vue SFC로 제한하며 SQL 구문, 테이블과 컬럼 분석은 구현하지 않는다.
 
 Repository 함수와 SQL이 읽고 변경하는 테이블 및 컬럼을 연결한다.
 
@@ -1761,11 +1765,10 @@ interface AnalysisEvidence {
 5. 기본 호출 그래프
 6. Gin 라우트와 Middleware
 7. Vue 컴포넌트, Router, composable과 Pinia
-8. PostgreSQL 테이블 및 컬럼 읽기·쓰기
-9. Vue API 호출과 Gin 라우트 연결
-10. Git 변경 심볼
-11. 테스트와 대상 코드 연결
-12. 분석 근거와 신뢰도
+8. Vue·TypeScript API 호출과 Gin 라우트 연결
+9. Git 변경 심볼
+10. 테스트와 대상 코드 연결
+11. 분석 근거와 신뢰도
 
 #### 2단계
 
@@ -1881,6 +1884,7 @@ Organization
  ├─ Organization members
  ├─ Project
  │   ├─ Project members
+ │   ├─ Project invitations
  │   ├─ Repository connection
  │   ├─ Source index and code graph
  │   ├─ Analysis jobs and results
@@ -1919,9 +1923,18 @@ Organization
 | Project Admin | O | O | O | O | O | O |
 | Developer | O | O | O | 정책에 따라 | X | X |
 | Viewer | O | X | 개인 세션만 | X | X | X |
-| Auditor | 제한적 | X | X | X | X | X |
 
 조직 관리 권한과 소스코드 열람 권한을 분리한다. Organization Admin이라는 이유만으로 모든 프로젝트의 원본 코드를 자동 열람할 수 없으며, 코드 접근에는 프로젝트 소속과 적절한 프로젝트 역할이 필요하다.
+
+#### 프로젝트 생성과 구성원 초대
+
+- 모든 active 로그인 사용자는 자신이 속한 조직에 프로젝트를 생성할 수 있다.
+- 프로젝트 생성자는 생성과 동시에 `Project Admin`이 된다. 프로젝트와 생성자의 membership은 하나의 DB 트랜잭션으로 저장한다.
+- Project Admin은 다른 사용자를 `Project Admin(관리자)`, `Developer(일반 개발자)`, `Viewer(뷰어)` 중 하나의 역할로 초대할 수 있다.
+- 초대받은 사용자는 로그인 후 초대를 수락해야 프로젝트 구성원이 된다. 초대 대상은 검증된 Keycloak 이메일 또는 내부 사용자 ID와 일치해야 한다.
+- 초대 생성·재전송·취소와 구성원 역할 변경·제거는 Project Admin만 할 수 있다. Developer와 Viewer는 자신 또는 타인의 역할을 변경할 수 없다.
+- 프로젝트에는 항상 한 명 이상의 Project Admin이 있어야 하며, 마지막 관리자의 강등과 제거는 허용하지 않는다.
+- 같은 프로젝트와 사용자에 대한 중복 pending 초대를 금지하고, 초대 토큰에는 만료 시간과 단일 사용 규칙을 적용한다.
 
 #### 세부 권한
 
@@ -2039,6 +2052,7 @@ organizations
 organization_members
 projects
 project_members
+project_invitations
 repositories
 code_files
 code_nodes
@@ -2136,15 +2150,16 @@ metadata
 MVP에는 다음을 포함한다.
 
 1. 사내 Keycloak OIDC 로그인과 서버 측 세션
-2. 조직 및 프로젝트 구성원 관리
-3. Organization Owner/Admin/Member와 Project Admin/Developer/Viewer 역할
-4. 고정된 역할-세부 권한 매핑
-5. 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
-6. 개인 탐색 세션과 프로젝트 공유 세션
-7. 분석 실행 및 취소 권한
-8. AI 사용과 코드 반출 정책
-9. 저장소, 구성원, 권한, AI 및 내보내기 감사 로그
-10. PostgreSQL의 조직 및 프로젝트 범위 강제
+2. 로그인 사용자별 프로젝트 생성과 생성자의 Project Admin 자동 지정
+3. 프로젝트 초대·수락·취소와 구성원 역할 관리
+4. Organization Owner/Admin/Member와 Project Admin/Developer/Viewer 역할
+5. 고정된 역할-세부 권한 매핑
+6. 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
+7. 개인 탐색 세션과 프로젝트 공유 세션
+8. 분석 실행 및 취소 권한
+9. AI 사용과 코드 반출 정책
+10. 저장소, 구성원, 권한, AI 및 내보내기 감사 로그
+11. PostgreSQL의 조직 및 프로젝트 범위 강제
 
 MVP에서 제외하고 후속 검토한다.
 
@@ -3097,6 +3112,7 @@ permission_version
 - 프런트엔드: Vue 3 + Naive UI + SCSS
 - 코드 뷰어: Monaco Editor
 - 그래프: Cytoscape.js + cytoscape-elk + elkjs
+- 통계 차트: Apache ECharts + vue-echarts
 - 제품 형태: 웹 애플리케이션
 - 인증: 사내 Keycloak OIDC
 - 세션: Gin 서버 측 세션과 HttpOnly 쿠키
@@ -3104,24 +3120,24 @@ permission_version
 - LLM 연동: 중앙 LLM Gateway와 OpenAI-compatible Provider 어댑터
 - 시스템 관리자: Keycloak `cosight-system-admin` 클라이언트 역할
 
-분석 엔진의 초기 범위는 다음을 임시 가정으로 하며 별도 확정이 필요하다.
+분석 엔진의 MVP 범위는 다음과 같이 확정한다.
 
 - 첫 분석 대상: Go + Gin 백엔드와 Vue 3 + TypeScript 프런트엔드
-- 데이터 계층: PostgreSQL SQL, Migration 및 Repository 코드
+- 분석 언어: Go, TypeScript, Vue SFC
+- MVP 제외 분석: JavaScript, JSX, SQL, SCSS의 의미 분석
 - 첫 프로젝트 형태: 단일 저장소 또는 모노레포 기반 웹 애플리케이션
-- 분석 방식: AST 및 언어 서버를 이용한 정적 분석
+- 분석 방식: AST, Type Checker, SSA와 프레임워크 규칙을 이용한 정적 분석
 - 코드 그래프 저장 방식: PostgreSQL의 노드 및 관계 테이블
 
 ### 18.2 MVP 포함 범위
 
 - 로컬 저장소 열기
-- Go, Vue SFC, TypeScript, JavaScript, SCSS 및 PostgreSQL SQL 파일 인덱싱
+- Go, TypeScript와 Vue SFC 파일 인덱싱
 - 패키지, 파일, 구조체, 인터페이스, 타입, 함수 및 메서드 추출
 - import, 호출 및 참조 관계 추출
 - Go 타입과 인터페이스 구현 관계 분석
 - Gin 라우트, 그룹, Middleware와 Handler 연결
 - Vue 컴포넌트, Router, composable, Pinia와 API 호출 연결
-- Repository SQL과 PostgreSQL 테이블 및 컬럼 읽기·쓰기 연결
 - Vue API 호출과 Gin 라우트의 프런트엔드-백엔드 연결
 - 심볼 검색
 - 진입점 중심 호출 그래프
@@ -3136,7 +3152,8 @@ permission_version
 - 현재 선택에서 다음 탐색 대상 추천
 - 분석 근거와 코드 링크가 포함된 프로젝트 질의응답
 - 사내 Keycloak 로그인과 로그아웃
-- 조직 및 프로젝트 구성원 관리
+- 로그인 사용자별 프로젝트 생성과 생성자의 Project Admin 자동 지정
+- 프로젝트 구성원 초대·수락·취소와 역할 관리
 - Project Admin, Developer, Viewer 역할
 - 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
 - 개인 및 프로젝트 공유 탐색 세션
@@ -3151,6 +3168,7 @@ permission_version
 ### 18.3 MVP 제외 범위
 
 - 런타임 에이전트
+- JavaScript, JSX, SQL과 SCSS의 의미 분석
 - 원격 협업 및 팀 워크스페이스
 - 다중 저장소 분석
 - 자동 수정
@@ -3169,15 +3187,15 @@ permission_version
 - 샘플 저장소 선정
 - AST 파서 및 언어 서버 결과 비교
 - Go package, 타입, SSA와 호출 그래프 분석 정확도 검증
+- TypeScript Compiler API와 Type Checker의 symbol·호출 해석 검증
 - Vue SFC의 Template, Script, composable과 API 호출 추출 검증
 - Gin 중첩 라우트와 Middleware 순서 복원 검증
-- PostgreSQL SQL의 테이블·컬럼 읽기와 쓰기 추출 검증
 - Vue API 호출과 Gin 라우트 연결의 신뢰도 검증
 - 심볼 ID 안정성 검증
 - 호출 관계 추출 정확도 측정
 - Monaco Editor의 다중 파일 Model, Decoration 및 메모리 정리 방식 검증
 - Cytoscape.js와 ELK를 이용해 노드 500개 및 엣지 1,500개에서 선택, 부분 갱신, compound node와 레이아웃 반응성 측정
-- Cytoscape.js의 카드형 노드 및 복합 그룹 표현이 요구사항을 충족하지 못할 경우 동일 데이터로 AntV G6 비교
+- Apache ECharts의 언어·노드·관계·경고 집계 차트와 접근 가능한 표 대체 표현 검증
 - 노드 1,000개 이상에서 집계 및 점진적 로딩 전략 검증
 - Web Worker 기반 elkjs 레이아웃의 취소, 재실행 및 오류 복구 검증
 - 사내 Keycloak 개발 환경에서 OIDC discovery, 로그인, 로그아웃 및 세션 만료 검증
@@ -3195,6 +3213,7 @@ permission_version
 
 - Keycloak OIDC 로그인과 서버 측 세션
 - 조직, 프로젝트, 구성원 및 고정 역할 모델
+- 사용자별 프로젝트 생성과 관리자·일반 개발자·뷰어 초대 흐름
 - Gin 공통 권한 서비스와 프로젝트 데이터 격리
 - Keycloak `cosight-system-admin` 역할과 시스템 관리 API 격리
 - LLM 연결, 실제 모델, 논리 모델 프로필 및 프로젝트 할당 관리
@@ -3256,7 +3275,6 @@ permission_version
 - 주요 진입점 탐지율
 - Gin 최종 라우트와 Middleware 순서 복원 정확도
 - Vue API 호출과 Gin 라우트 연결의 정밀도와 재현율
-- Repository와 PostgreSQL 테이블·컬럼 연결 정확도
 - Git 변경 심볼과 관련 테스트 연결률
 - 잘못된 영향 관계 신고율
 - 불확실한 관계가 올바르게 표시되는 비율
@@ -3322,7 +3340,7 @@ permission_version
 
 다음 항목은 구현 전에 확정해야 한다.
 
-1. Go·Gin·Vue·PostgreSQL 이후 지원할 언어와 프레임워크 우선순위
+1. Go·Gin·TypeScript·Vue 이후 지원할 언어와 프레임워크 우선순위
 2. 웹 애플리케이션의 로컬 전용 또는 서버 배포 방식
 3. AI 기능의 기본 활성화 여부와 코드 전송 정책
 4. 첫 번째 대표 사용자: 신규 개발자, 유지보수 개발자 또는 버그 분석 담당자
@@ -3337,10 +3355,10 @@ permission_version
 
 제품 구현은 Go, Gin, PostgreSQL, Redis, Vue 3, Naive UI, SCSS, Monaco Editor, Cytoscape.js 및 elkjs 조합으로 확정한다. 인증은 사내 Keycloak, LLM 자격증명은 사내 Vault 또는 승인된 Secret Manager를 사용한다. 분석 기능의 빠른 검증을 위해 다음 조합을 권장한다.
 
-- **대상:** Go + Gin 백엔드, Vue 3 + TypeScript 프런트엔드와 PostgreSQL을 사용하는 웹 애플리케이션
-- **대표 작업:** API 진입점에서 데이터베이스 및 외부 API까지 호출 흐름 탐색
+- **대상:** Go + Gin 백엔드와 Vue 3 + TypeScript 프런트엔드로 구성된 웹 애플리케이션
+- **대표 작업:** Vue 화면에서 TypeScript API client와 Gin Handler까지 호출 흐름 탐색
 - **제품 형태:** Gin API와 Vue 3 SPA로 구성된 웹 애플리케이션
-- **분석 범위:** Go 타입·호출, Gin 라우트·Middleware, Vue 컴포넌트·API 호출, PostgreSQL 읽기·쓰기, 관련 테스트
+- **분석 범위:** Go 타입·호출, Gin 라우트·Middleware, TypeScript symbol·호출, Vue 컴포넌트·API 호출과 관련 테스트
 - **차별점:** 모든 시각적 관계에서 근거 코드로 즉시 이동
 - **LLM 연결:** 중앙 LLM Gateway를 통한 OpenAI-compatible Provider
 - **LLM 제한:** 프로젝트별 RPM·TPM·동시 요청·일/월 토큰 한도
@@ -3353,7 +3371,7 @@ permission_version
 2. 대표 샘플 저장소 2~3개를 선정한다.
 3. 핵심 화면의 와이어프레임을 작성한다.
 4. 공통 코드 그래프 스키마를 구체화한다.
-5. Go·Gin·Vue·TypeScript·PostgreSQL 통합 분석 기술 검증을 수행한다.
+5. Go·Gin·TypeScript·Vue 통합 분석 기술 검증을 수행한다.
 6. 기능 이해 및 영향 분석 시나리오로 사용자 테스트를 진행한다.
 7. 사내 Keycloak 시스템 관리자 역할과 Secret Manager 연동 방식을 확정한다.
 8. LLM Gateway, Redis Rate Limiter와 사용량 정산 기술 검증을 수행한다.
