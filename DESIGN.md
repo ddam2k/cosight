@@ -1849,7 +1849,7 @@ Vue SPA가 Keycloak 토큰을 브라우저의 `localStorage`에 장기 보관하
 #### OIDC 설정 원칙
 
 - Authorization Code Flow를 사용한다.
-- Keycloak realm, issuer, client ID 및 redirect URI를 환경별 설정으로 관리한다.
+- Keycloak Realm은 `cosight`, 운영 Callback URL은 사용자 제공값인 `https://cosight.wasming.com`으로 한다. 권장 client ID는 `cosight-web`, post-logout URL은 `https://cosight.wasming.com`이다. 외부 Callback은 Ingress 또는 BFF root handler에서 내부 callback 처리기로 전달하며 issuer와 실제 client secret은 배포 환경 설정으로 관리한다.
 - Gin 서버는 Keycloak discovery 문서와 JWKS를 사용해 토큰을 검증한다.
 - `issuer`, `audience`, 서명, 만료 시각, `state` 및 `nonce`를 검증한다.
 - 세션 쿠키에 `HttpOnly`, `Secure`, 적절한 `SameSite` 정책을 적용한다.
@@ -1882,7 +1882,7 @@ MVP에서는 Keycloak이 인증만 담당하고 Cosight의 프로젝트 역할�
 ```text
 Organization
  ├─ Organization members
- ├─ Project
+ ├─ Organization project
  │   ├─ Project members
  │   ├─ Project invitations
  │   ├─ Repository connection
@@ -1890,6 +1890,12 @@ Organization
  │   ├─ Analysis jobs and results
  │   └─ Exploration sessions
  └─ Audit events
+
+User
+ └─ Personal project
+     ├─ Project members
+     ├─ Repository connection
+     └─ Analysis data
 ```
 
 접근 허용 여부는 단순 역할 이름이 아니라 다음 정보를 함께 사용해 판단한다.
@@ -1907,14 +1913,12 @@ Organization
 
 #### 역할
 
-조직 역할:
+조직 관리 역할:
 
 | 역할 | 주요 권한 |
 | --- | --- |
-| Organization Owner | 조직 소유권 이전, 조직 삭제, 전체 보안 및 구성원 관리 |
-| Organization Admin | 조직 구성원, 프로젝트 및 보안 정책 관리 |
-| Organization Member | 명시적으로 배정된 프로젝트에 접근 |
-| Organization Auditor | 허용된 감사 로그와 보안 설정을 읽기 전용으로 확인 |
+| System Administrator | 조직 생성·변경, 사용자 할당·해제와 조직 프로젝트 관리자 복구 |
+| Organization Member | 소속 조직에 프로젝트를 생성하고 조직 프로젝트 초대 대상이 될 수 있음 |
 
 프로젝트 역할:
 
@@ -1924,17 +1928,21 @@ Organization
 | Developer | O | O | O | 정책에 따라 | X | X |
 | Viewer | O | X | 개인 세션만 | X | X | X |
 
-조직 관리 권한과 소스코드 열람 권한을 분리한다. Organization Admin이라는 이유만으로 모든 프로젝트의 원본 코드를 자동 열람할 수 없으며, 코드 접근에는 프로젝트 소속과 적절한 프로젝트 역할이 필요하다.
+조직 관리 권한과 소스코드 열람 권한을 분리한다. System Administrator라는 이유만으로 조직 프로젝트의 원본 코드를 자동 열람할 수 없으며, 코드 접근에는 프로젝트 소속과 적절한 프로젝트 역할이 필요하다.
 
 #### 프로젝트 생성과 구성원 초대
 
-- 모든 active 로그인 사용자는 자신이 속한 조직에 프로젝트를 생성할 수 있다.
+- 모든 active 로그인 사용자는 조직 소속 여부와 관계없이 개인 프로젝트를 생성할 수 있다.
+- 조직원은 개인 프로젝트 또는 자신이 속한 조직의 조직 프로젝트를 생성할 수 있다.
 - 프로젝트 생성자는 생성과 동시에 `Project Admin`이 된다. 프로젝트와 생성자의 membership은 하나의 DB 트랜잭션으로 저장한다.
 - Project Admin은 다른 사용자를 `Project Admin(관리자)`, `Developer(일반 개발자)`, `Viewer(뷰어)` 중 하나의 역할로 초대할 수 있다.
-- 초대받은 사용자는 로그인 후 초대를 수락해야 프로젝트 구성원이 된다. 초대 대상은 검증된 Keycloak 이메일 또는 내부 사용자 ID와 일치해야 한다.
-- 초대 생성·재전송·취소와 구성원 역할 변경·제거는 Project Admin만 할 수 있다. Developer와 Viewer는 자신 또는 타인의 역할을 변경할 수 없다.
+- 개인 프로젝트는 다른 active 사용자를 초대할 수 있다. 조직 프로젝트는 같은 조직의 현재 조직원만 초대할 수 있다.
+- 조직 프로젝트 접근에는 project membership과 현재 organization membership이 모두 필요하며, 조직 소속만으로 모든 조직 프로젝트가 자동 공유되지는 않는다.
+- MVP는 이메일 초대를 발송하지 않는다. 초대받은 active 사용자는 인앱 초대를 수락해야 프로젝트 구성원이 되며 서버는 로그인 사용자 ID와 초대 대상 ID를 대조한다.
+- 초대 생성·만료 갱신·취소와 구성원 역할 변경·제거는 Project Admin만 할 수 있다. Developer와 Viewer는 자신 또는 타인의 역할을 변경할 수 없다.
 - 프로젝트에는 항상 한 명 이상의 Project Admin이 있어야 하며, 마지막 관리자의 강등과 제거는 허용하지 않는다.
-- 같은 프로젝트와 사용자에 대한 중복 pending 초대를 금지하고, 초대 토큰에는 만료 시간과 단일 사용 규칙을 적용한다.
+- 같은 프로젝트와 사용자에 대한 중복 pending 초대를 금지하고 인앱 초대에는 7일 만료와 단일 수락 규칙을 적용한다.
+- System Administrator가 조직원을 해제할 때 관련 조직 프로젝트 membership과 pending 초대를 함께 회수한다. 유일한 Project Admin인 프로젝트가 있으면 대체 조직원을 관리자로 지정해야 한다.
 
 #### 세부 권한
 
@@ -2150,16 +2158,19 @@ metadata
 MVP에는 다음을 포함한다.
 
 1. 사내 Keycloak OIDC 로그인과 서버 측 세션
-2. 로그인 사용자별 프로젝트 생성과 생성자의 Project Admin 자동 지정
-3. 프로젝트 초대·수락·취소와 구성원 역할 관리
-4. Organization Owner/Admin/Member와 Project Admin/Developer/Viewer 역할
-5. 고정된 역할-세부 권한 매핑
-6. 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
-7. 개인 탐색 세션과 프로젝트 공유 세션
-8. 분석 실행 및 취소 권한
-9. AI 사용과 코드 반출 정책
-10. 저장소, 구성원, 권한, AI 및 내보내기 감사 로그
-11. PostgreSQL의 조직 및 프로젝트 범위 강제
+2. System Administrator의 조직 생성과 조직원 할당·해제
+3. 조직이 없는 사용자의 개인 프로젝트 생성
+4. 조직원의 조직 프로젝트 생성과 생성자의 Project Admin 자동 지정
+5. 조직 프로젝트 공유 대상의 조직원 제한
+6. 프로젝트 초대·수락·취소와 구성원 역할 관리
+7. Organization Member와 Project Admin/Developer/Viewer 역할
+8. 고정된 역할-세부 권한 매핑
+9. 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
+10. 개인 탐색 세션과 프로젝트 공유 세션
+11. 분석 실행 및 취소 권한
+12. AI 사용과 코드 반출 정책
+13. 저장소, 구성원, 권한, AI 및 내보내기 감사 로그
+14. PostgreSQL의 조직 및 프로젝트 범위 강제
 
 MVP에서 제외하고 후속 검토한다.
 
@@ -2260,13 +2271,17 @@ MVP에서는 `System Administrator` 역할 하나로 시작하고 운영 요구�
 
 사내 Keycloak에 `cosight-system-admin` 클라이언트 역할을 정의한다. 이 역할이 있는 사용자만 시스템 관리 콘솔과 시스템 관리 API에 접근할 수 있다. 시스템 관리자 역할은 Cosight UI에서 자신이나 다른 사용자에게 임의로 부여할 수 없으며 Keycloak 관리 절차를 통해서만 변경한다.
 
-프로젝트 역할은 Cosight PostgreSQL에서 계속 관리하고 시스템 관리자 역할만 Keycloak에서 가져온다. 토큰의 역할 claim과 실제 로그인 세션을 검증한 뒤 내부 시스템 관리자 컨텍스트를 생성한다.
+조직 membership과 프로젝트 역할은 Cosight PostgreSQL에서 관리하고 시스템 관리자 역할만 Keycloak에서 가져온다. System Administrator는 조직을 생성하고 기존 active 사용자를 조직에 할당·해제할 수 있지만, 별도 project membership 없이는 프로젝트 코드에 접근할 수 없다. 토큰의 역할 claim과 실제 로그인 세션을 검증한 뒤 내부 시스템 관리자 컨텍스트를 생성한다.
 
 ### 16.3 시스템 관리 콘솔
 
 ```text
 시스템 관리
  ├─ 대시보드
+ ├─ 조직 관리
+ │   ├─ 조직 생성·변경
+ │   ├─ 사용자 검색과 할당
+ │   └─ 조직원 해제와 프로젝트 관리자 교체
  ├─ LLM 연결
  │   ├─ Provider 연결
  │   ├─ 자격증명 교체
@@ -3152,7 +3167,10 @@ permission_version
 - 현재 선택에서 다음 탐색 대상 추천
 - 분석 근거와 코드 링크가 포함된 프로젝트 질의응답
 - 사내 Keycloak 로그인과 로그아웃
-- 로그인 사용자별 프로젝트 생성과 생성자의 Project Admin 자동 지정
+- 시스템 관리자의 조직 생성과 조직원 할당·해제
+- 조직이 없는 사용자의 개인 프로젝트 생성
+- 조직원의 조직 프로젝트 생성과 생성자의 Project Admin 자동 지정
+- 조직 프로젝트 공유 대상의 조직원 제한
 - 프로젝트 구성원 초대·수락·취소와 역할 관리
 - Project Admin, Developer, Viewer 역할
 - 프로젝트 단위 코드, 그래프, 검색 및 분석 데이터 격리
@@ -3212,8 +3230,9 @@ permission_version
 ### 단계 1: 코드 지도
 
 - Keycloak OIDC 로그인과 서버 측 세션
-- 조직, 프로젝트, 구성원 및 고정 역할 모델
-- 사용자별 프로젝트 생성과 관리자·일반 개발자·뷰어 초대 흐름
+- 시스템 관리자의 조직 생성과 조직원 할당·해제
+- 개인·조직 프로젝트와 고정 역할 모델
+- 개인 프로젝트 생성과 조직원 제한 초대 흐름
 - Gin 공통 권한 서비스와 프로젝트 데이터 격리
 - Keycloak `cosight-system-admin` 역할과 시스템 관리 API 격리
 - LLM 연결, 실제 모델, 논리 모델 프로필 및 프로젝트 할당 관리
@@ -3341,13 +3360,13 @@ permission_version
 다음 항목은 구현 전에 확정해야 한다.
 
 1. Go·Gin·TypeScript·Vue 이후 지원할 언어와 프레임워크 우선순위
-2. 웹 애플리케이션의 로컬 전용 또는 서버 배포 방식
-3. AI 기능의 기본 활성화 여부와 코드 전송 정책
+2. Kubernetes replica, autoscaling, backup 제품과 RPO/RTO
+3. DeepSeek 연결의 실제 API model ID, Base URL과 데이터 처리 region
 4. 첫 번째 대표 사용자: 신규 개발자, 유지보수 개발자 또는 버그 분석 담당자
 5. 호출 그래프와 데이터 흐름 중 MVP에서 우선할 분석
-6. 대상 저장소의 일반적인 규모
+6. 운영에서 관측된 대상 저장소의 일반적인 규모와 시스템 한도 조정값
 7. 오픈소스, 개인용 또는 팀용 제품 중 초기 배포 전략
-8. MVP에서 허용할 LLM Provider와 데이터 처리 지역
+8. 외부 전송 전 사용자 재확인이 필요한 프로젝트 분류 기준
 9. 사용할 사내 Secret Manager와 자격증명 교체 절차
 10. 프로젝트별 기본 RPM·TPM·일/월 토큰 한도
 
@@ -3361,19 +3380,26 @@ permission_version
 - **분석 범위:** Go 타입·호출, Gin 라우트·Middleware, TypeScript symbol·호출, Vue 컴포넌트·API 호출과 관련 테스트
 - **차별점:** 모든 시각적 관계에서 근거 코드로 즉시 이동
 - **LLM 연결:** 중앙 LLM Gateway를 통한 OpenAI-compatible Provider
+- **초기 LLM:** DeepSeek, 제품 표시 모델 `deepseek v1 flash`; 실제 API model ID는 연결 시험으로 검증
+- **배포:** Kubernetes
+- **저장소:** 허용된 서버 경로와 HTTPS/SSH Git URL
 - **LLM 제한:** 프로젝트별 RPM·TPM·동시 요청·일/월 토큰 한도
 
 이 조합은 언어 도구 생태계가 성숙하고, 진입점과 외부 경계가 비교적 명확하며, 실제 사용자 과제로 제품 가치를 검증하기 쉽다는 장점이 있다.
 
 ## 25. 다음 작업
 
-1. 결정 필요 항목을 확정한다.
-2. 대표 샘플 저장소 2~3개를 선정한다.
-3. 핵심 화면의 와이어프레임을 작성한다.
-4. 공통 코드 그래프 스키마를 구체화한다.
-5. Go·Gin·TypeScript·Vue 통합 분석 기술 검증을 수행한다.
-6. 기능 이해 및 영향 분석 시나리오로 사용자 테스트를 진행한다.
-7. 사내 Keycloak 시스템 관리자 역할과 Secret Manager 연동 방식을 확정한다.
+구현 준비 상태의 기준 목록과 설계 산출물은 [MVP_SPEC.md의 MVP 설계 확인 체크리스트](./MVP_SPEC.md#22-mvp-설계-확인-체크리스트)를 단일 기준으로 사용한다.
+
+- [ ] 외부 환경 확인 항목의 담당자와 완료 예정일을 지정한다.
+- [ ] 대표 샘플 저장소 2~3개와 성능 측정 환경을 선정한다.
+- [ ] 핵심 화면의 정상·빈 상태·오류·권한 없음 wireframe을 작성한다.
+- [ ] OpenAPI, DB schema, RBAC matrix와 analyzer protocol을 작성한다.
+- [ ] 공통 코드 그래프 JSON schema와 golden fixture를 작성한다.
+- [ ] repository snapshot, 작업 queue와 검색·그래프 질의 ADR을 확정한다.
+- [ ] Go·Gin·TypeScript·Vue 통합 분석 기술 검증을 수행한다.
+- [ ] 기능 이해 및 영향 분석 시나리오로 사용자 테스트를 진행한다.
+- [ ] Keycloak 시스템 관리자 역할과 Secret Manager 연동 방식을 확정한다.
 8. LLM Gateway, Redis Rate Limiter와 사용량 정산 기술 검증을 수행한다.
 
 ## 26. 관련 공식 자료

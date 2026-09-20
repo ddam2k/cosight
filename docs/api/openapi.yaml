@@ -1,0 +1,705 @@
+openapi: 3.1.0
+info:
+  title: Cosight API
+  version: 0.1.0
+  description: Cosight MVP REST and SSE contract.
+servers:
+  - url: /api/v1
+security:
+  - cookieAuth: []
+tags:
+  - name: Auth
+  - name: Projects
+  - name: Membership
+  - name: Analysis
+  - name: Exploration
+  - name: AI
+  - name: Jobs
+  - name: System
+paths:
+  /auth/login:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Start Keycloak login
+      responses:
+        "302": {description: Redirect to Keycloak}
+  /auth/callback:
+    get:
+      tags: [Auth]
+      security: []
+      summary: Complete OIDC callback
+      responses:
+        "302": {description: Redirect to the validated application return path}
+        "400": {$ref: "#/components/responses/BadRequest"}
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoke the local session
+      responses:
+        "204": {description: Logged out}
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current user and role summary
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CurrentUser"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List accessible projects
+      parameters:
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {name: q, in: query, schema: {type: string}}
+        - {name: scope, in: query, schema: {$ref: "#/components/schemas/ProjectScope"}}
+        - {name: organizationId, in: query, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Project page
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ProjectPage"}
+    post:
+      tags: [Projects]
+      summary: Create a personal or organization project
+      x-permission: authenticated
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateProjectRequest"}
+      responses:
+        "201":
+          description: Created project; caller is Project Admin
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Project"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{projectId}:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Projects]
+      x-permission: project.read
+      summary: Get project
+      responses:
+        "200":
+          description: Project
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Project"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      tags: [Projects]
+      x-permission: project.manage
+      summary: Update project metadata
+      parameters:
+        - {$ref: "#/components/parameters/IfMatch"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateProjectRequest"}
+      responses:
+        "200":
+          description: Updated project
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Project"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [Projects]
+      x-permission: project.delete
+      summary: Queue project deletion
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      responses:
+        "202":
+          description: Deletion job queued
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobRef"}
+
+  /projects/{projectId}/index:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    post:
+      tags: [Analysis]
+      x-permission: analysis.run
+      summary: Queue an index build
+      parameters:
+        - {$ref: "#/components/parameters/IdempotencyKey"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [incremental, full]}
+      responses:
+        "202":
+          description: Index job queued
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/JobRef"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{projectId}/index/status:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Analysis]
+      x-permission: project.read
+      summary: Get active index and current job status
+      responses:
+        "200":
+          description: Index status
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/IndexStatus"}
+  /projects/{projectId}/index/versions:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Analysis]
+      x-permission: project.read
+      summary: List index versions
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+
+  /projects/{projectId}/members:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Membership]
+      x-permission: member.manage
+      summary: List project members
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+  /projects/{projectId}/members/{userId}:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+      - {$ref: "#/components/parameters/UserId"}
+    put:
+      tags: [Membership]
+      x-permission: member.manage
+      summary: Change a project role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: {$ref: "#/components/schemas/ProjectRole"}
+      responses:
+        "200": {description: Role changed}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      tags: [Membership]
+      x-permission: member.manage
+      summary: Remove a project member
+      responses:
+        "204": {description: Member removed}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /projects/{projectId}/invitations:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Membership]
+      x-permission: member.manage
+      summary: List project invitations
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+    post:
+      tags: [Membership]
+      x-permission: member.invite
+      summary: Invite a user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateInvitationRequest"}
+      responses:
+        "201": {description: Invitation created}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /project-invitations:
+    get:
+      tags: [Membership]
+      summary: List invitations for the current user
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+  /project-invitations/{invitationId}/accept:
+    post:
+      tags: [Membership]
+      summary: Accept an invitation
+      parameters:
+        - {$ref: "#/components/parameters/InvitationId"}
+      responses:
+        "200": {description: Invitation accepted}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /project-invitations/{invitationId}/reject:
+    post:
+      tags: [Membership]
+      summary: Reject an invitation
+      parameters:
+        - {$ref: "#/components/parameters/InvitationId"}
+      responses:
+        "204": {description: Invitation rejected}
+
+  /projects/{projectId}/analysis/summary:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    get:
+      tags: [Analysis]
+      x-permission: graph.read
+      summary: Get analysis aggregates
+      responses:
+        "200":
+          description: Analysis summary
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AnalysisSummary"}
+  /projects/{projectId}/analysis/warnings:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+      - {$ref: "#/components/parameters/Cursor"}
+    get:
+      tags: [Analysis]
+      x-permission: graph.read
+      summary: List analysis warnings
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+  /projects/{projectId}/search:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+      - {name: q, in: query, required: true, schema: {type: string, minLength: 1}}
+      - {$ref: "#/components/parameters/Cursor"}
+    get:
+      tags: [Analysis]
+      x-permission: source.search
+      summary: Search files, symbols and entry points
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+  /projects/{projectId}/files/tree:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+      - {name: parentId, in: query, schema: {type: string, format: uuid}}
+      - {$ref: "#/components/parameters/Cursor"}
+    get:
+      tags: [Analysis]
+      x-permission: source.read
+      summary: List a lazy file-tree page
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+  /projects/{projectId}/files/{fileId}/content:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+      - {$ref: "#/components/parameters/FileId"}
+    get:
+      tags: [Analysis]
+      x-permission: source.read
+      summary: Get code from the active snapshot
+      responses:
+        "200":
+          description: File content
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/FileContent"}
+  /projects/{projectId}/graph/query:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    post:
+      tags: [Analysis]
+      x-permission: graph.read
+      summary: Query a graph
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GraphQuery"}
+      responses:
+        "200":
+          description: Graph result
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GraphResult"}
+  /projects/{projectId}/graph/expand:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    post:
+      tags: [Analysis]
+      x-permission: graph.read
+      summary: Expand graph around nodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GraphQuery"}
+      responses:
+        "200":
+          description: Graph delta
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GraphResult"}
+  /projects/{projectId}/impact:
+    parameters:
+      - {$ref: "#/components/parameters/ProjectId"}
+    post:
+      tags: [Analysis]
+      x-permission: analysis.run
+      summary: Calculate direct impact
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/GraphQuery"}
+      responses:
+        "200":
+          description: Impact result
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/GraphResult"}
+
+  /jobs/{jobId}:
+    parameters:
+      - {$ref: "#/components/parameters/JobId"}
+    get:
+      tags: [Jobs]
+      summary: Get job
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Job"}
+  /jobs/{jobId}/cancel:
+    parameters:
+      - {$ref: "#/components/parameters/JobId"}
+    post:
+      tags: [Jobs]
+      x-permission: analysis.cancel
+      summary: Request cancellation
+      responses:
+        "202": {description: Cancellation requested}
+  /jobs/{jobId}/events:
+    parameters:
+      - {$ref: "#/components/parameters/JobId"}
+    get:
+      tags: [Jobs]
+      summary: Stream job events
+      responses:
+        "200":
+          description: Server-sent events
+          content:
+            text/event-stream:
+              schema: {type: string}
+
+  /system/organizations:
+    get:
+      tags: [System]
+      x-role: cosight-system-admin
+      summary: List organizations
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+    post:
+      tags: [System]
+      x-role: cosight-system-admin
+      summary: Create an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateOrganizationRequest"}
+      responses:
+        "201":
+          description: Organization created
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Organization"}
+  /system/organizations/{organizationId}/members:
+    parameters:
+      - {$ref: "#/components/parameters/OrganizationId"}
+    get:
+      tags: [System]
+      x-role: cosight-system-admin
+      summary: List organization members and project-role impact
+      responses:
+        "200": {$ref: "#/components/responses/GenericPage"}
+    post:
+      tags: [System]
+      x-role: cosight-system-admin
+      summary: Assign an active user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId]
+              properties:
+                userId: {type: string, format: uuid}
+      responses:
+        "201": {description: User assigned}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /system/organizations/{organizationId}/members/{userId}/remove:
+    parameters:
+      - {$ref: "#/components/parameters/OrganizationId"}
+      - {$ref: "#/components/parameters/UserId"}
+    post:
+      tags: [System]
+      x-role: cosight-system-admin
+      summary: Remove a user and revoke organization-project access
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RemoveOrganizationMemberRequest"}
+      responses:
+        "204": {description: User removed}
+        "409": {$ref: "#/components/responses/Conflict"}
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: cosight_session
+  parameters:
+    ProjectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    OrganizationId: {name: organizationId, in: path, required: true, schema: {type: string, format: uuid}}
+    UserId: {name: userId, in: path, required: true, schema: {type: string, format: uuid}}
+    InvitationId: {name: invitationId, in: path, required: true, schema: {type: string, format: uuid}}
+    FileId: {name: fileId, in: path, required: true, schema: {type: string, format: uuid}}
+    JobId: {name: jobId, in: path, required: true, schema: {type: string, format: uuid}}
+    Cursor: {name: cursor, in: query, schema: {type: string}}
+    Limit: {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    IfMatch: {name: If-Match, in: header, required: true, schema: {type: string}}
+    IdempotencyKey: {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 16, maxLength: 128}}
+  responses:
+    BadRequest:
+      description: Invalid request
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    Unauthorized:
+      description: Authentication required
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    Forbidden:
+      description: Permission denied
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    NotFound:
+      description: Resource not found or hidden
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    Conflict:
+      description: State conflict
+      content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}
+    GenericPage:
+      description: Cursor page
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/CursorPage"}
+  schemas:
+    ProjectScope: {type: string, enum: [personal, organization]}
+    ProjectRole: {type: string, enum: [project_admin, developer, viewer]}
+    CurrentUser:
+      type: object
+      required: [id, displayName, status, systemAdministrator, organizations]
+      properties:
+        id: {type: string, format: uuid}
+        displayName: {type: string}
+        email: {type: [string, "null"], format: email}
+        status: {type: string, enum: [active, suspended]}
+        systemAdministrator: {type: boolean}
+        organizations:
+          type: array
+          items: {$ref: "#/components/schemas/Organization"}
+    Organization:
+      type: object
+      required: [id, name, slug, status]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        status: {type: string, enum: [active, suspended]}
+    CreateOrganizationRequest:
+      type: object
+      required: [name, slug]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        slug: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,62}$"}
+    Project:
+      type: object
+      required: [id, scope, name, slug, status, role, version]
+      properties:
+        id: {type: string, format: uuid}
+        scope: {$ref: "#/components/schemas/ProjectScope"}
+        organizationId: {type: [string, "null"], format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        description: {type: [string, "null"]}
+        repositoryAlias: {type: string}
+        defaultBranch: {type: [string, "null"]}
+        currentCommit: {type: [string, "null"]}
+        status: {type: string, enum: [draft, active, error, deleting, deleted]}
+        role: {$ref: "#/components/schemas/ProjectRole"}
+        activeIndexVersion: {type: integer, format: int64}
+        version: {type: integer, format: int64}
+    CreateProjectRequest:
+      type: object
+      required: [scope, name, slug, repositoryAlias, repositorySourceType]
+      properties:
+        scope: {$ref: "#/components/schemas/ProjectScope"}
+        organizationId: {type: [string, "null"], format: uuid}
+        name: {type: string, minLength: 1, maxLength: 120}
+        slug: {type: string, pattern: "^[a-z0-9][a-z0-9-]{1,62}$"}
+        description: {type: [string, "null"], maxLength: 2000}
+        repositoryAlias: {type: string, minLength: 1, maxLength: 120}
+        repositorySourceType: {type: string, enum: [local_path, git_url]}
+        repositoryPath: {type: string, minLength: 1}
+        repositoryUrl: {type: string, format: uri}
+        credentialRef: {type: [string, "null"]}
+        defaultBranch: {type: [string, "null"]}
+        excludePatterns: {type: array, items: {type: string}, maxItems: 100}
+    UpdateProjectRequest:
+      type: object
+      minProperties: 1
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        slug: {type: string}
+        description: {type: [string, "null"], maxLength: 2000}
+        defaultBranch: {type: [string, "null"]}
+        excludePatterns: {type: array, items: {type: string}}
+    ProjectPage:
+      allOf:
+        - {$ref: "#/components/schemas/CursorPage"}
+        - type: object
+          properties:
+            items: {type: array, items: {$ref: "#/components/schemas/Project"}}
+    CreateInvitationRequest:
+      type: object
+      required: [userId, role]
+      properties:
+        userId: {type: string, format: uuid}
+        role: {$ref: "#/components/schemas/ProjectRole"}
+    RemoveOrganizationMemberRequest:
+      type: object
+      required: [replacementProjectAdmins]
+      properties:
+        replacementProjectAdmins:
+          type: object
+          additionalProperties: {type: string, format: uuid}
+    CursorPage:
+      type: object
+      required: [items, hasMore]
+      properties:
+        items: {type: array, items: {type: object}}
+        nextCursor: {type: [string, "null"]}
+        hasMore: {type: boolean}
+        indexVersion: {type: [integer, "null"], format: int64}
+    IndexStatus:
+      type: object
+      required: [activeIndexVersion, status]
+      properties:
+        activeIndexVersion: {type: integer, format: int64}
+        buildingIndexVersion: {type: [integer, "null"], format: int64}
+        status: {type: string, enum: [idle, queued, running, failed, cancelled]}
+        job: {oneOf: [{$ref: "#/components/schemas/Job"}, {type: "null"}]}
+    AnalysisSummary:
+      type: object
+      required: [indexVersion, languages, nodeKinds, edgeKinds, warnings]
+      properties:
+        indexVersion: {type: integer, format: int64}
+        languages: {type: array, items: {type: object}}
+        nodeKinds: {type: array, items: {type: object}}
+        edgeKinds: {type: array, items: {type: object}}
+        warnings: {type: object}
+    FileContent:
+      type: object
+      required: [fileId, language, content, contentHash, indexVersion, stale]
+      properties:
+        fileId: {type: string, format: uuid}
+        language: {type: string, enum: [go, typescript, vue]}
+        content: {type: string}
+        contentHash: {type: string}
+        indexVersion: {type: integer, format: int64}
+        stale: {type: boolean}
+    GraphQuery:
+      type: object
+      required: [mode, startNodeIds]
+      properties:
+        mode: {type: string, enum: [structure, flow, impact]}
+        startNodeIds: {type: array, minItems: 1, maxItems: 20, items: {type: string, format: uuid}}
+        direction: {type: string, enum: [incoming, outgoing, both], default: outgoing}
+        depth: {type: integer, minimum: 1, maximum: 5, default: 2}
+        edgeKinds: {type: array, items: {type: string}}
+        maxNodes: {type: integer, minimum: 1, maximum: 500, default: 200}
+    GraphResult:
+      type: object
+      required: [indexVersion, partial, nodes, edges, aggregates, warnings]
+      properties:
+        indexVersion: {type: integer, format: int64}
+        partial: {type: boolean}
+        nodes: {type: array, items: {$ref: "#/components/schemas/GraphNode"}}
+        edges: {type: array, items: {$ref: "#/components/schemas/GraphEdge"}}
+        aggregates: {type: array, items: {type: object}}
+        warnings: {type: array, items: {type: object}}
+    GraphNode:
+      type: object
+      required: [id, kind, name, language]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string}
+        name: {type: string}
+        qualifiedName: {type: [string, "null"]}
+        language: {type: string}
+        fileId: {type: [string, "null"], format: uuid}
+        parentId: {type: [string, "null"], format: uuid}
+        metadata: {type: object}
+    GraphEdge:
+      type: object
+      required: [id, source, target, kind, confidence, evidenceCount]
+      properties:
+        id: {type: string, format: uuid}
+        source: {type: string, format: uuid}
+        target: {type: string, format: uuid}
+        kind: {type: string}
+        confidence: {type: string, enum: [confirmed, probable, inferred]}
+        evidenceCount: {type: integer, minimum: 1}
+    JobRef:
+      type: object
+      required: [jobId]
+      properties:
+        jobId: {type: string, format: uuid}
+    Job:
+      type: object
+      required: [id, projectId, kind, status, progress]
+      properties:
+        id: {type: string, format: uuid}
+        projectId: {type: string, format: uuid}
+        kind: {type: string}
+        status: {type: string, enum: [queued, running, completed, failed, cancel_requested, cancelled]}
+        progress: {type: number, minimum: 0, maximum: 1}
+        stage: {type: [string, "null"]}
+        errorCode: {type: [string, "null"]}
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code: {type: string}
+            message: {type: string}
+            requestId: {type: string}
+            details: {type: object}

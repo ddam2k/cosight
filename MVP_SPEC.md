@@ -49,7 +49,9 @@ ProjectDetail.vue
 ### 2.3 MVP 완료 기준
 
 - 사내 Keycloak 계정으로 로그인 및 로그아웃할 수 있다.
-- 모든 로그인 사용자가 프로젝트를 생성할 수 있고, 생성자는 자동으로 프로젝트 관리자가 된다.
+- System Administrator가 조직을 생성하고 active 사용자를 조직원으로 할당·해제할 수 있다.
+- 모든 로그인 사용자가 개인 프로젝트를 생성할 수 있고, 조직원은 조직 프로젝트도 생성할 수 있으며 생성자는 자동으로 프로젝트 관리자가 된다.
+- 조직 프로젝트는 현재 조직원에게만 공유할 수 있다.
 - 프로젝트 관리자, 일반 개발자와 뷰어 역할이 서버에서 강제된다.
 - 서버에 마운트된 저장소를 프로젝트로 등록하고 인덱싱할 수 있다.
 - Go, TypeScript와 Vue SFC에서 MVP 필수 노드와 관계를 추출한다.
@@ -110,8 +112,10 @@ Vue와 TypeScript 분석 Helper는 Node 런타임을 사용할 수 있으나 외
 - Keycloak Authorization Code Flow
 - Gin 서버 세션과 HttpOnly 쿠키
 - 시스템 관리자 Keycloak client role
-- 조직과 프로젝트 구성원
+- 시스템 관리자의 조직 생성과 조직원 할당·해제
 - 로그인 사용자별 프로젝트 생성
+- 조직이 없는 사용자의 개인 프로젝트 생성
+- 조직 프로젝트 공유 대상의 조직원 제한
 - 프로젝트 생성자의 Project Admin 자동 지정
 - Project Admin, Developer, Viewer 초대와 역할 관리
 - 프로젝트 단위 데이터 격리
@@ -120,6 +124,7 @@ Vue와 TypeScript 분석 Helper는 Node 런타임을 사용할 수 있으나 외
 #### 프로젝트와 저장소
 
 - 서버 마운트 경로 기반 저장소 등록
+- Git URL 기반 저장소 등록과 서버 관리 clone
 - 허용된 저장소 루트 아래 경로만 등록
 - Git 브랜치와 현재 커밋 표시
 - 최초 및 증분 인덱싱
@@ -328,6 +333,8 @@ frontend/src/
 | `/projects/:projectId/settings/repository` | 저장소와 인덱싱 설정 | `repository.connect` |
 | `/projects/:projectId/settings/ai` | 프로젝트 AI 설정과 사용량 | Project Admin |
 | `/system` | 시스템 대시보드 | System Administrator |
+| `/system/organizations` | 조직 관리 | System Administrator |
+| `/system/organizations/:organizationId` | 조직 상세와 조직원 할당 | System Administrator |
 | `/system/llm/connections` | LLM 연결 | System Administrator |
 | `/system/llm/models` | 모델 레지스트리 | System Administrator |
 | `/system/llm/profiles` | 논리 모델 프로필 | System Administrator |
@@ -356,6 +363,7 @@ Cosight
  │       └─ AI와 사용량
  ├─ 시스템 관리                  [System Administrator]
  │   ├─ 대시보드
+ │   ├─ 조직 관리
  │   ├─ LLM 연결
  │   ├─ 모델 레지스트리
  │   ├─ 논리 모델 프로필
@@ -390,6 +398,7 @@ Cosight
 #### 내 프로젝트
 
 - 사용자가 구성원인 프로젝트를 카드 또는 표로 표시한다.
+- 개인 프로젝트와 조직 프로젝트를 구분하고 조직별로 필터링한다.
 - 이름, 역할, 상태, 저장소 별칭, 기본 브랜치, 마지막 인덱싱 시각으로 검색·필터·정렬한다.
 - `프로젝트 만들기`, `프로젝트 열기`, `코드 탐색`을 주요 동작으로 제공한다.
 - 대기 중인 초대가 있으면 상단 배너와 개수를 표시한다.
@@ -397,7 +406,9 @@ Cosight
 
 #### 프로젝트 만들기
 
-- 조직, 프로젝트 이름, slug, 저장소 표시 이름, 서버 저장소 경로, 기본 브랜치와 제외 패턴을 입력한다.
+- 프로젝트 범위를 `개인` 또는 사용자가 소속된 `조직`으로 선택하고 프로젝트 이름, slug, 저장소 표시 이름, 서버 저장소 경로, 기본 브랜치와 제외 패턴을 입력한다.
+- 조직이 없는 사용자는 개인 프로젝트를 생성할 수 있으며 조직 선택 UI를 표시하지 않는다.
+- 조직 프로젝트를 선택하면 서버가 현재 조직 소속을 다시 확인한다.
 - slug 중복, 허용되지 않은 경로, symlink 탈출과 필수값 오류를 필드 단위로 표시한다.
 - 생성 전 입력 내용을 확인하고, 생성 완료 시 생성자가 Project Admin임을 표시한 뒤 프로젝트 개요로 이동한다.
 - 프로젝트 생성과 최초 인덱싱은 분리한다. 생성 성공 후 인덱싱을 시작하며 실패 시 재시도할 수 있다.
@@ -442,8 +453,9 @@ Cosight
 
 - `구성원`과 `대기 중인 초대` 탭을 제공한다.
 - 구성원 이름, 이메일, 역할, 참여일과 초대한 사용자를 표시하고 역할로 필터링한다.
-- `사용자 초대` 대화상자에서 이메일과 `관리자 / 일반 개발자 / 뷰어` 역할을 선택한다.
-- Project Admin은 초대 재전송·취소, 구성원 역할 변경과 제거를 수행할 수 있다.
+- `사용자 초대` 대화상자에서 기존 active 사용자를 검색하고 `관리자 / 일반 개발자 / 뷰어` 역할을 선택한다.
+- 조직 프로젝트에서는 현재 조직원만 검색·초대할 수 있고, 개인 프로젝트에서는 active 사용자를 직접 초대할 수 있다.
+- Project Admin은 인앱 초대 갱신·취소, 구성원 역할 변경과 제거를 수행할 수 있다.
 - 자기 자신의 역할 변경 또는 탈퇴로 마지막 Project Admin이 없어지면 저장을 차단하고 다른 관리자를 먼저 지정하도록 안내한다.
 - 역할별 권한 설명을 역할 선택 컨트롤 옆에 표시한다.
 
@@ -457,7 +469,7 @@ Cosight
 
 `저장소와 인덱싱` 탭:
 
-- 저장소 별칭, 허용된 서버 경로, 기본 브랜치와 제외 패턴을 관리한다.
+- 저장소 별칭, 연결 유형(서버 경로 또는 Git URL), 기본 브랜치와 제외 패턴을 관리한다.
 - 현재 커밋, 인덱스 버전, 마지막 성공·실패 시각과 실패 원인을 표시한다.
 - 전체 재인덱싱, 증분 인덱싱, 실행 취소와 실패 작업 재시도를 제공한다.
 - 실제 서버 절대 경로는 필요한 관리자에게만 제한적으로 표시하고 일반 구성원에게는 별칭만 노출한다.
@@ -475,6 +487,13 @@ Cosight
 
 - Provider 상태, 요청 성공률, p95 지연, 토큰 사용량, 열린 Circuit과 최근 관리 작업을 요약한다.
 - 장애 연결, 한도 임박 프로젝트와 최근 권한 거부에서 상세 화면으로 이동한다.
+
+`조직 관리`:
+
+- 조직 생성, 이름·상태 변경과 조직 목록 검색을 제공한다.
+- Cosight에 로그인한 active 사용자를 이메일 또는 이름으로 검색해 조직에 할당한다.
+- 조직원을 해제할 때 영향을 받는 조직 프로젝트와 유일한 Project Admin 여부를 확인하고 필요한 대체 관리자를 지정한다.
+- 시스템 관리자는 조직과 멤버십 metadata만 관리하며 프로젝트 구성원이 아니면 원본 코드, 그래프와 탐색 세션을 열 수 없다.
 
 `LLM 연결`:
 
@@ -551,6 +570,7 @@ ProjectListPage
 ProjectCreatePage
  ├─ PageHeader
  ├─ ProjectCreateStepper
+ │   ├─ ProjectScopeStep
  │   ├─ ProjectIdentityStep
  │   ├─ RepositoryConnectionStep
  │   ├─ IndexingOptionsStep
@@ -559,7 +579,8 @@ ProjectCreatePage
  └─ FormActionBar
 ```
 
-- `ProjectIdentityStep`: 조직, 이름, slug와 설명을 입력하고 slug 형식과 중복을 검증한다.
+- `ProjectScopeStep`: 개인 프로젝트 또는 사용자가 소속된 조직을 선택하고 각 범위의 공유 제한을 설명한다.
+- `ProjectIdentityStep`: 이름, slug와 설명을 입력하고 선택한 프로젝트 범위 안에서 slug 형식과 중복을 검증한다.
 - `RepositoryConnectionStep`: 저장소 별칭, 서버 경로와 기본 브랜치를 입력하고 경로 검증 결과를 표시한다.
 - `IndexingOptionsStep`: 제외 패턴과 생성 후 최초 인덱싱 실행 여부를 설정한다.
 - `ProjectCreateReviewStep`: 생성될 프로젝트와 생성자의 Project Admin 지정 사실을 확인한다.
@@ -622,7 +643,7 @@ ProjectOverviewPage
 - `ProjectQuickActions`: 코드 탐색, 인덱싱, 구성원 초대와 설정 동작을 현재 권한에 따라 표시한다.
 - `RepositorySummaryCard`: 저장소 별칭, 기본 브랜치, 현재 커밋과 동기화 시각을 표시한다.
 - `IndexingStatusCard`: 단계별 진행률, 마지막 성공·실패, 취소와 재시도를 제공한다.
-- `CodeInventoryStats`: 파일, 심볼, 진입점과 DB 객체 수를 선택 시 관련 탐색 화면의 필터로 연결한다.
+- `CodeInventoryStats`: 언어별 파일, 심볼, 컴포넌트와 진입점 수를 선택 시 관련 탐색 화면의 필터로 연결한다.
 - 페이지는 프로젝트 기본 정보와 요약 통계를 독립적으로 조회해 일부 요청이 실패해도 사용 가능한 카드는 유지한다.
 
 #### `AnalysisWorkspacePage`
@@ -771,6 +792,29 @@ ProjectAISettingsPage
 
 #### 시스템 관리 페이지
 
+`OrganizationListPage`와 `OrganizationDetailPage`:
+
+```text
+OrganizationListPage
+ ├─ OrganizationFilterBar
+ ├─ OrganizationDataTable
+ ├─ CreateOrganizationButton
+ └─ OrganizationEditorDialog
+
+OrganizationDetailPage
+ ├─ OrganizationSummaryCard
+ ├─ OrganizationMemberSearch
+ ├─ OrganizationMemberTable
+ ├─ AssignOrganizationMemberDialog
+ ├─ RemoveOrganizationMemberDialog
+ └─ ReplacementProjectAdminStep
+```
+
+- 조직 생성과 사용자 할당은 System Administrator만 수행한다.
+- 사용자 검색은 Cosight `users`에 존재하는 active 사용자로 제한하며 Keycloak 디렉터리를 직접 검색하지 않는다.
+- `ReplacementProjectAdminStep`은 해제 대상이 조직 프로젝트의 유일한 관리자일 때 다른 조직원을 대체 관리자로 지정하게 한다.
+- 사용자 해제와 영향받는 프로젝트 membership 회수는 하나의 트랜잭션으로 처리한다.
+
 `SystemDashboardPage`:
 
 ```text
@@ -895,9 +939,11 @@ AuditLogPage
 
 ### 8.1 OIDC 흐름
 
+MVP Keycloak Realm은 `cosight`이며 운영 Callback URL은 사용자 제공값인 `https://cosight.wasming.com`이다. 권장 Client ID는 `cosight-web`이며 실제 발급값은 Kubernetes 배포 설정으로 주입한다. 외부 Callback이 서비스 루트이므로 Ingress 또는 BFF root handler가 authorization code를 내부 `/api/v1/auth/callback` 처리기로 전달한다.
+
 1. 브라우저가 `GET /api/v1/auth/login`을 호출한다.
 2. Gin이 `state`, `nonce`와 PKCE 값을 생성하고 Keycloak으로 리다이렉트한다.
-3. Keycloak 인증 후 `/api/v1/auth/callback`으로 돌아온다.
+3. Keycloak 인증 후 외부 Callback `https://cosight.wasming.com`으로 돌아오고 Ingress/BFF가 내부 `/api/v1/auth/callback` 처리기로 전달한다.
 4. Gin이 code를 교환하고 issuer, audience, signature, nonce와 만료를 검증한다.
 5. 사용자 정보를 upsert하고 서버 세션을 만든다.
 6. 브라우저에는 Secure, HttpOnly, SameSite 쿠키만 전달한다.
@@ -906,17 +952,19 @@ AuditLogPage
 
 | 역할 | 핵심 권한 |
 | --- | --- |
-| System Administrator | 모든 시스템 관리 API |
-| Organization Admin | 조직 정책과 조직 구성원 관리 |
+| System Administrator | 조직 생성·사용자 할당을 포함한 모든 시스템 관리 API |
+| Organization Member | 소속 조직에 조직 프로젝트를 생성하고 초대 대상이 될 수 있음 |
 | Project Admin | 프로젝트 설정, 구성원, 저장소, 분석 및 공유 |
 | Developer (일반 개발자) | 코드 열람, 분석 실행, 개인·프로젝트 탐색 세션 |
 | Viewer (뷰어) | 코드·그래프 읽기와 개인 탐색 세션 |
 
-모든 active 로그인 사용자는 자신이 속한 조직에 프로젝트를 생성할 수 있다. 프로젝트 생성 트랜잭션은 프로젝트와 생성자의 `project_admin` membership을 함께 저장해야 하며, 둘 중 하나라도 실패하면 전체를 rollback한다. System Administrator는 Keycloak `cosight-system-admin` client role에서 가져온다. Organization Admin과 프로젝트 역할은 PostgreSQL membership에서 관리한다. System Administrator 권한만으로 프로젝트 원본 코드 열람 권한을 자동 부여하지 않는다.
+모든 active 로그인 사용자는 조직 소속 여부와 관계없이 개인 프로젝트를 생성할 수 있다. 조직에 소속된 사용자는 개인 프로젝트 또는 해당 조직의 조직 프로젝트를 생성할 수 있다. 프로젝트 생성 트랜잭션은 프로젝트와 생성자의 `project_admin` membership을 함께 저장해야 하며, 둘 중 하나라도 실패하면 전체를 rollback한다. System Administrator는 Keycloak `cosight-system-admin` client role에서 가져오고 조직 소속과 프로젝트 역할은 PostgreSQL membership에서 관리한다. System Administrator 권한만으로 프로젝트 원본 코드 열람 권한을 자동 부여하지 않는다.
 
 ### 8.3 필수 권한
 
 ```text
+organization.read
+organization.manage
 project.read
 project.manage
 project.delete
@@ -937,9 +985,9 @@ ai.use
 audit.read
 ```
 
-모든 API는 기본 거부한다. 프로젝트 ID를 받는 요청은 URL, Body 또는 세션의 값을 신뢰하지 않고 DB membership을 확인한다.
+모든 API는 기본 거부한다. `organization.manage`는 System Administrator에게만 부여한다. 프로젝트 ID를 받는 요청은 URL, Body 또는 세션의 값을 신뢰하지 않고 DB membership을 확인한다. 조직 프로젝트 요청은 프로젝트 membership과 현재 organization membership을 모두 확인한다.
 
-프로젝트 초대 시 지정 가능한 역할은 `project_admin`, `developer`, `viewer`로 고정한다. 초대 생성, 재전송과 취소는 Project Admin만 수행할 수 있다. 초대받은 사용자는 초대를 수락한 뒤 구성원이 되며, 초대에 지정된 역할을 스스로 변경할 수 없다. 프로젝트에는 항상 한 명 이상의 Project Admin이 있어야 하므로 마지막 관리자의 강등과 제거는 거부한다.
+프로젝트 초대 시 지정 가능한 역할은 `project_admin`, `developer`, `viewer`로 고정한다. 초대 생성, 재전송과 취소는 Project Admin만 수행할 수 있다. 개인 프로젝트는 다른 active 사용자를 초대할 수 있다. 조직 프로젝트는 초대 생성과 수락 시점 모두에서 같은 조직의 현재 조직원인지 확인한다. 조직 소속만으로 프로젝트 접근이 자동 허용되지는 않으며 프로젝트 membership도 필요하다. 초대받은 사용자는 초대를 수락한 뒤 구성원이 되며, 초대에 지정된 역할을 스스로 변경할 수 없다. 프로젝트에는 항상 한 명 이상의 Project Admin이 있어야 하므로 마지막 관리자의 강등과 제거는 거부한다.
 
 ## 9. 데이터 모델
 
@@ -979,10 +1027,19 @@ Refresh Token이 필요하면 별도 암호화 컬럼 또는 Secret Manager 참�
 #### `organizations`, `organization_members`
 
 ```text
-organizations(id, name, created_at, updated_at)
-organization_members(organization_id, user_id, role, created_at)
+organizations(
+  id, name, slug, status,
+  created_by, created_at, updated_at
+)
+organization_members(
+  organization_id, user_id,
+  assigned_by, assigned_at
+)
 PK (organization_id, user_id)
+UNIQUE (organizations.slug)
 ```
+
+조직은 System Administrator만 생성·수정할 수 있다. MVP의 조직 membership에는 별도 조직 역할을 두지 않는다. 할당 대상은 한 번 이상 로그인해 `users`에 존재하는 active 사용자로 제한한다. 사용자는 여러 조직에 소속될 수 있다.
 
 ### 9.2 프로젝트와 구성원
 
@@ -990,12 +1047,15 @@ PK (organization_id, user_id)
 
 ```text
 id uuid PK
-organization_id uuid FK organizations
+scope text NOT NULL
+organization_id uuid FK organizations NULL
 name text NOT NULL
 slug text NOT NULL
 description text
 repository_alias text NOT NULL
-repository_path text NOT NULL
+repository_source_type text NOT NULL
+repository_path text NULL
+repository_url text NULL
 default_branch text
 current_commit text
 status text NOT NULL
@@ -1003,10 +1063,19 @@ active_index_version bigint NOT NULL DEFAULT 0
 created_by uuid FK users
 created_at timestamptz NOT NULL
 updated_at timestamptz NOT NULL
-UNIQUE (organization_id, slug)
+CHECK (scope IN ('personal', 'organization'))
+CHECK (repository_source_type IN ('local_path', 'git_url'))
+CHECK (
+  (repository_source_type = 'local_path' AND repository_path IS NOT NULL AND repository_url IS NULL) OR
+  (repository_source_type = 'git_url' AND repository_url IS NOT NULL AND repository_path IS NULL)
+)
+CHECK (
+  (scope = 'personal' AND organization_id IS NULL) OR
+  (scope = 'organization' AND organization_id IS NOT NULL)
+)
 ```
 
-`repository_path`는 API 응답에서 원문을 반환하지 않는다.
+조직 프로젝트 slug는 `(organization_id, slug)`, 개인 프로젝트 slug는 `(created_by, slug)` 범위에서 각각 unique partial index로 보호한다. 로컬 경로와 자격증명이 포함될 수 있는 Git URL 원문은 API 응답에서 반환하지 않는다. Git URL은 HTTPS 또는 SSH 형식을 허용하고 자격증명은 URL에 포함하지 않으며 Secret Manager 참조로 연결한다.
 
 #### `project_members`
 
@@ -1025,11 +1094,9 @@ CHECK (role IN ('project_admin', 'developer', 'viewer'))
 ```text
 id uuid PK
 project_id uuid FK projects
-invitee_email text NOT NULL
-invitee_user_id uuid FK users NULL
+invitee_user_id uuid FK users NOT NULL
 role text NOT NULL
 status text NOT NULL
-token_hash text UNIQUE NOT NULL
 expires_at timestamptz NOT NULL
 accepted_at timestamptz
 revoked_at timestamptz
@@ -1039,7 +1106,9 @@ CHECK (role IN ('project_admin', 'developer', 'viewer'))
 CHECK (status IN ('pending', 'accepted', 'revoked', 'expired'))
 ```
 
-동일 프로젝트와 이메일에는 유효한 `pending` 초대를 하나만 허용한다. 수락 시 초대 상태 변경과 `project_members` upsert를 하나의 트랜잭션으로 처리하며, 서버는 로그인 사용자의 검증된 Keycloak 이메일 또는 내부 사용자 ID가 초대 대상과 일치하는지 확인한다.
+MVP는 이메일을 발송하지 않고 Cosight에 이미 존재하는 active 사용자를 검색해 인앱 초대한다. 동일 프로젝트와 사용자에는 유효한 `pending` 초대를 하나만 허용하고 기본 만료 기간은 7일이다. 수락 시 초대 상태 변경과 `project_members` upsert를 하나의 트랜잭션으로 처리하며, 서버는 로그인 사용자 ID가 `invitee_user_id`와 일치하는지 확인한다. 조직 프로젝트에서는 초대 생성·수락·역할 변경 시 대상 사용자의 현재 조직 membership을 추가로 확인한다.
+
+System Administrator가 사용자를 조직에서 해제할 때 해당 조직 프로젝트의 pending 초대를 취소하고 project membership을 함께 회수한다. 해제 대상이 어떤 프로젝트의 유일한 Project Admin이면 요청을 `409 ORGANIZATION_MEMBER_IS_LAST_PROJECT_ADMIN`으로 거부하고 프로젝트별 대체 관리자를 먼저 지정하도록 한다. 조직원 해제, 대체 관리자 지정과 membership 회수는 하나의 트랜잭션으로 수행한다.
 
 ### 9.3 코드 인덱스
 
@@ -1328,7 +1397,7 @@ UNIQUE (scope_type, scope_id)
 ```text
 id uuid PK
 request_id text UNIQUE NOT NULL
-organization_id uuid NOT NULL
+organization_id uuid NULL
 project_id uuid NOT NULL
 user_id uuid NOT NULL
 feature text NOT NULL
@@ -1349,6 +1418,8 @@ completed_at timestamptz
 
 프롬프트와 응답 본문은 저장하지 않는다.
 
+개인 프로젝트의 LLM 요청은 `organization_id=NULL`로 저장한다. 조직 기준 집계는 조직 프로젝트에만 적용하고 모든 요청은 항상 `project_id`로 격리한다.
+
 ### 9.6 감사 로그
 
 ```text
@@ -1360,7 +1431,7 @@ audit_events(
 )
 ```
 
-감사 `metadata`에는 소스코드, 토큰, API Key, Client Secret, 프롬프트와 LLM 응답 본문을 넣지 않는다.
+개인 프로젝트 또는 프로젝트와 무관한 이벤트에서는 `organization_id`가 `NULL`일 수 있다. 감사 `metadata`에는 소스코드, 토큰, API Key, Client Secret, 프롬프트와 LLM 응답 본문을 넣지 않는다.
 
 ## 10. HTTP API
 
@@ -1395,7 +1466,7 @@ audit_events(
 | Method | Path | 권한 | 설명 |
 | --- | --- | --- | --- |
 | GET | `/projects` | 로그인 | 접근 가능한 프로젝트 목록 |
-| POST | `/projects` | 로그인 및 조직 소속 | 프로젝트 생성, 요청자를 Project Admin으로 지정 |
+| POST | `/projects` | 로그인 | 개인 또는 소속 조직 프로젝트 생성, 요청자를 Project Admin으로 지정 |
 | GET | `/projects/:id` | `project.read` | 프로젝트 상세 |
 | PATCH | `/projects/:id` | `project.manage` | 이름, 제외 경로와 설정 변경 |
 | DELETE | `/projects/:id` | `project.delete` | 프로젝트 삭제 요청 |
@@ -1405,10 +1476,11 @@ audit_events(
 | GET | `/projects/:id/members` | `member.manage` | 구성원 목록 |
 | POST | `/projects/:id/invitations` | `member.invite` | 관리자·일반 개발자·뷰어 역할로 초대 |
 | GET | `/projects/:id/invitations` | `member.manage` | 대기·만료·취소된 초대 목록 |
+| POST | `/projects/:id/invitations/:invitationId/renew` | `member.invite` | 대기 중인 인앱 초대 만료를 7일로 갱신 |
 | DELETE | `/projects/:id/invitations/:invitationId` | `member.invite` | 대기 중인 초대 취소 |
 | GET | `/project-invitations` | 로그인 | 현재 사용자의 초대 목록 |
-| POST | `/project-invitations/accept` | 로그인 및 초대 대상 일치 | Body의 초대 토큰을 검증하고 구성원 등록 |
-| POST | `/project-invitations/reject` | 로그인 및 초대 대상 일치 | Body의 초대 토큰을 검증하고 초대 거절 |
+| POST | `/project-invitations/:invitationId/accept` | 로그인 및 초대 대상 일치 | 현재 사용자 대상 초대를 수락하고 구성원 등록 |
+| POST | `/project-invitations/:invitationId/reject` | 로그인 및 초대 대상 일치 | 현재 사용자 대상 초대 거절 |
 | PUT | `/projects/:id/members/:userId` | `member.manage` | 구성원 역할 변경 |
 | DELETE | `/projects/:id/members/:userId` | `member.manage` | 구성원 제거 |
 
@@ -1416,28 +1488,31 @@ audit_events(
 
 ```json
 {
-  "organizationId": "uuid",
+  "scope": "organization",
+  "organizationId": "uuid-or-null",
   "name": "Cosight",
   "slug": "cosight",
   "description": "코드 구조와 실행 흐름을 탐색하는 프로젝트",
   "repositoryAlias": "cosight-main",
-  "repositoryPath": "C:/repositories/cosight",
+  "repositorySourceType": "git_url",
+  "repositoryUrl": "https://git.example.com/platform/cosight.git",
+  "credentialRef": "vault://cosight/repositories/cosight-main",
   "excludePatterns": ["node_modules/**", "dist/**", "vendor/**"]
 }
 ```
 
-서버는 경로를 정규화하고 허용 루트 하위인지 확인한 후 저장한다.
+`scope=personal`이면 `organizationId`는 `null`, `scope=organization`이면 현재 사용자가 소속된 조직 ID여야 한다. `local_path`는 경로를 정규화해 허용 루트 하위인지 확인하고, `git_url`은 허용 scheme·host 정책과 자격증명 참조를 검증한 뒤 Worker 전용 볼륨에 clone한다. 프로젝트와 생성자의 Project Admin membership은 하나의 트랜잭션으로 저장한다.
 
 프로젝트 초대 요청:
 
 ```json
 {
-  "email": "developer@example.com",
+  "userId": "active-user-uuid",
   "role": "developer"
 }
 ```
 
-`role`은 `project_admin`, `developer`, `viewer` 중 하나여야 한다. 서버는 클라이언트가 보낸 초대자 ID나 프로젝트 역할을 신뢰하지 않고 현재 세션과 DB membership으로 `member.invite`를 다시 확인한다.
+`role`은 `project_admin`, `developer`, `viewer` 중 하나여야 한다. 이메일 주소로 미가입자를 초대하지 않으며 대상은 Cosight의 active 사용자 검색 결과에서 선택한다. 서버는 클라이언트가 보낸 초대자 ID나 프로젝트 역할을 신뢰하지 않고 현재 세션과 DB membership으로 `member.invite`를 다시 확인한다.
 
 ### 10.4 검색과 진입점
 
@@ -1598,6 +1673,12 @@ SSE 연결에도 세션, 프로젝트 권한과 사용량 제한을 적용한다
 
 | Method | Path | 설명 |
 | --- | --- | --- |
+| GET/POST | `/system/organizations` | 조직 목록 조회와 생성 |
+| GET/PATCH | `/system/organizations/:id` | 조직 상세 조회와 이름·상태 변경 |
+| GET | `/system/organizations/:id/members` | 조직원 목록과 프로젝트 역할 영향 조회 |
+| POST | `/system/organizations/:id/members` | 기존 active 사용자 조직 할당 |
+| POST | `/system/organizations/:id/members/:userId/remove` | 대체 관리자 검증 후 조직원 해제 |
+| GET | `/system/users?q=&status=&cursor=` | 조직 할당용 사용자 검색 |
 | GET/POST | `/system/llm/connections` | 연결 목록 및 생성 |
 | GET/PATCH/DELETE | `/system/llm/connections/:id` | 연결 관리 |
 | POST | `/system/llm/connections/:id/test` | 연결 시험 |
@@ -1612,6 +1693,19 @@ SSE 연결에도 세션, 프로젝트 권한과 사용량 제한을 적용한다
 | GET | `/system/audit` | 감사 로그 |
 
 비밀 교체 API는 실제 비밀 값을 DB에 저장하지 않고 Secret Manager에 기록한 뒤 `secret_ref`만 갱신한다.
+
+조직원 해제 요청은 유일한 Project Admin 교체가 필요한 프로젝트별 대체 사용자를 함께 전달한다.
+
+```json
+{
+  "replacementProjectAdmins": {
+    "project-uuid-1": "replacement-user-uuid",
+    "project-uuid-2": "replacement-user-uuid"
+  }
+}
+```
+
+대체 사용자는 같은 조직의 현재 조직원이어야 한다. 이 작업은 프로젝트 역할 metadata만 변경하며 System Administrator에게 프로젝트 코드 열람 권한을 부여하지 않는다.
 
 ### 10.9 작업 상태
 
@@ -2105,7 +2199,18 @@ system → connection → profile → project
 
 ## 14. 시스템 관리 화면
 
-### 14.1 LLM 연결
+### 14.1 조직 관리
+
+- 조직 목록, 생성과 이름·상태 변경
+- active 사용자 검색과 조직 할당
+- 조직원별 참여 프로젝트와 역할 영향 확인
+- 조직원 해제 전 유일한 Project Admin 프로젝트 검사
+- 프로젝트별 대체 관리자 지정과 membership 회수
+- 조직 생성·할당·해제 감사 이벤트 조회
+
+System Administrator는 이 화면에서 조직 및 membership metadata만 관리한다. 별도 프로젝트 membership 없이는 프로젝트 코드, 그래프와 탐색 내용을 열 수 없다.
+
+### 14.2 LLM 연결
 
 - 목록, 상태와 마지막 검사
 - 연결 생성 및 수정
@@ -2116,7 +2221,7 @@ system → connection → profile → project
 
 비밀 값은 입력 후 다시 표시하지 않는다.
 
-### 14.2 모델과 프로필
+### 14.3 모델과 프로필
 
 - Provider model ID와 capability 등록
 - Context 및 출력 한도
@@ -2124,7 +2229,7 @@ system → connection → profile → project
 - 기능별 파라미터와 데이터 등급
 - 프로젝트 할당 현황
 
-### 14.3 사용량
+### 14.4 사용량
 
 필수 지표:
 
@@ -2136,7 +2241,7 @@ system → connection → profile → project
 - `reported`와 `estimated` 비율
 - 프로젝트·프로필·모델·연결별 필터
 
-### 14.4 임계치 상태
+### 14.5 임계치 상태
 
 MVP는 화면 내 상태만 제공한다.
 
@@ -2153,10 +2258,14 @@ MVP는 화면 내 상태만 제공한다.
 
 - 모든 API는 기본 거부한다.
 - 프로젝트 리소스 접근은 매 요청 membership을 확인한다.
+- 조직 프로젝트는 매 요청 현재 organization membership도 함께 확인한다.
+- 조직 프로젝트의 초대·역할 변경 대상은 현재 조직원으로 제한한다.
+- 조직에서 사용자를 해제할 때 관련 프로젝트 membership과 pending 초대를 원자적으로 회수한다.
 - 프로젝트 생성자에게 Project Admin membership을 트랜잭션으로 부여한다.
-- 초대 토큰은 원문을 저장하지 않고 hash만 저장하며, 단일 사용과 만료 시간을 강제한다.
+- 인앱 초대는 대상 사용자 ID를 서버 세션과 대조하고 단일 수락과 7일 만료를 강제한다.
 - 마지막 Project Admin의 강등과 제거를 금지한다.
 - 시스템 관리 API는 Keycloak client role을 확인한다.
+- System Administrator의 조직 관리 권한만으로 프로젝트 코드 접근을 허용하지 않는다.
 - 저장소 경로는 allowlist와 실제 경로를 검증한다.
 - LLM 자격증명은 Secret Manager에 저장한다.
 - 로그와 Trace에 소스 본문, 토큰, 비밀, 프롬프트와 응답을 기록하지 않는다.
@@ -2168,6 +2277,7 @@ MVP는 화면 내 상태만 제공한다.
 ### 15.2 감사 대상
 
 - 로그인, 로그아웃과 로그인 실패
+- 조직 생성·변경과 조직원 할당·해제
 - 프로젝트 생성과 구성원 초대·수락·취소·역할 변경·제거
 - 저장소 등록과 인덱싱
 - LLM 연결, 자격증명 참조, 모델과 프로필 변경
@@ -2179,11 +2289,13 @@ MVP는 화면 내 상태만 제공한다.
 
 ### 15.3 데이터 보존
 
+프로젝트 삭제는 복구 유예를 제공하지 않는 영구 삭제다. 삭제 요청 즉시 신규 접근과 작업을 차단하고, 진행 중 작업을 취소한 뒤 프로젝트 멤버십·초대·설정·저장소 clone·코드 인덱스·검색 문서·탐색 세션·LLM 사용 메타데이터 등 프로젝트에 귀속된 데이터를 삭제 작업으로 모두 제거한다. 삭제 작업 자체의 성공·실패 운영 로그에는 원본 코드나 프로젝트 상세를 남기지 않는다.
+
 MVP 기본값:
 
 | 데이터 | 보존 |
 | --- | --- |
-| 코드 인덱스 | 프로젝트가 존재하는 동안 활성 및 직전 1개 버전 |
+| 프로젝트 귀속 데이터 | 프로젝트가 존재하는 동안만 보존하며 프로젝트 삭제 시 모두 영구 삭제 |
 | 분석 작업 | 30일 |
 | LLM 요청 메타데이터 | 90일 |
 | 시간별 사용량 | 90일 |
@@ -2191,7 +2303,7 @@ MVP 기본값:
 | 감사 로그 | 사내 정책 적용, 기본 1년 |
 | 프롬프트·응답 본문 | 저장하지 않음 |
 
-실제 기간은 사내 보안 정책 확인 후 환경 설정으로 변경 가능하게 한다.
+프로젝트가 유지되는 동안의 작업·사용량·감사 보존 기간은 환경 설정으로 변경할 수 있지만 프로젝트 삭제 정책보다 우선할 수 없다.
 
 ## 16. 관측과 운영
 
@@ -2203,7 +2315,7 @@ MVP 기본값:
 request_id
 trace_id
 user_id
-organization_id
+organization_id (조직 프로젝트일 때만)
 project_id
 job_id
 llm_request_id
@@ -2272,6 +2384,8 @@ COSIGHT_LOG_LEVEL
 ### 18.1 단위 테스트
 
 - 역할-권한 매핑
+- 개인·조직 프로젝트 scope와 organization_id 제약
+- 조직 프로젝트 초대 대상의 조직 membership 검증
 - 초대 역할 enum 검증과 마지막 Project Admin 보호
 - 저장소 경로 정규화와 탈출 방지
 - 심볼 stable key
@@ -2289,6 +2403,9 @@ COSIGHT_LOG_LEVEL
 
 - Keycloak 테스트 realm 로그인과 역할
 - PostgreSQL migration 및 프로젝트 격리
+- System Administrator의 조직 생성과 조직원 할당·해제
+- 조직원 해제 시 프로젝트 접근·초대 회수와 대체 관리자 트랜잭션
+- 조직이 없는 사용자의 개인 프로젝트 생성
 - 프로젝트 생성과 생성자 Project Admin 지정의 원자성
 - 초대 수락, 만료, 취소, 중복 및 대상 사용자 일치 검증
 - Redis 동시 Rate limit
@@ -2302,23 +2419,29 @@ COSIGHT_LOG_LEVEL
 ### 18.3 E2E 테스트
 
 1. 로그인한다.
-2. 일반 로그인 사용자가 프로젝트를 생성하고 Project Admin이 되었는지 확인한다.
-3. 다른 사용자를 Project Admin, Developer, Viewer 역할로 각각 초대하고 수락한다.
-4. Project Admin이 구성원 역할을 변경하고 Developer와 Viewer는 초대·역할 변경 API에서 거부되는지 확인한다.
-5. 인덱싱 완료를 기다린다.
-6. Gin Route를 검색한다.
-7. Vue component에서 TypeScript API client와 Gin Handler까지 그래프를 연다.
-8. 관계 근거를 Monaco에서 확인한다.
-9. 직접 영향 분석을 실행한다.
-10. AI로 흐름 설명을 생성하고 근거 링크를 확인한다.
-11. Viewer가 분석 실행 및 시스템 관리 API에서 거부되는지 확인한다.
-12. 프로젝트 한도를 초과해 429가 반환되는지 확인한다.
+2. 조직이 없는 사용자가 개인 프로젝트를 생성하고 Project Admin이 되었는지 확인한다.
+3. System Administrator가 조직을 생성하고 사용자를 조직원으로 할당한다.
+4. 조직원이 조직 프로젝트를 생성하고 Project Admin이 되었는지 확인한다.
+5. 조직 프로젝트에 비조직원을 초대하면 거부되고 조직원은 Project Admin, Developer, Viewer 역할로 초대·수락할 수 있는지 확인한다.
+6. Project Admin이 구성원 역할을 변경하고 Developer와 Viewer는 초대·역할 변경 API에서 거부되는지 확인한다.
+7. 조직원 해제 즉시 해당 조직 프로젝트 접근이 거부되는지 확인한다.
+8. 인덱싱 완료를 기다린다.
+9. Gin Route를 검색한다.
+10. Vue component에서 TypeScript API client와 Gin Handler까지 그래프를 연다.
+11. 관계 근거를 Monaco에서 확인한다.
+12. 직접 영향 분석을 실행한다.
+13. AI로 흐름 설명을 생성하고 근거 링크를 확인한다.
+14. Viewer가 분석 실행 및 시스템 관리 API에서 거부되는지 확인한다.
+15. 프로젝트 한도를 초과해 429가 반환되는지 확인한다.
 
 ### 18.4 보안 테스트
 
 - 다른 프로젝트 ID로 수평 권한 상승 시도
+- 조직 프로젝트에 비조직원 초대·수락·직접 접근 시도
+- 조직에서 해제된 사용자의 기존 세션·SSE·다운로드 재사용
+- project membership이 없는 System Administrator의 조직 프로젝트 코드 접근 시도
 - Developer 또는 Viewer의 구성원 초대와 역할 상승 시도
-- 타인의 초대 토큰 수락과 만료·취소 토큰 재사용
+- 타인의 invitation ID 수락과 만료·취소된 인앱 초대 재사용
 - 마지막 Project Admin의 강등 또는 제거 시도
 - 다른 사용자의 private 탐색 세션 접근
 - 경로 traversal과 symlink escape
@@ -2360,8 +2483,10 @@ COSIGHT_LOG_LEVEL
 
 - Keycloak OIDC와 서버 세션
 - System Administrator 역할
-- 조직, 프로젝트와 구성원
-- 사용자별 프로젝트 생성과 생성자 Project Admin 자동 지정
+- 시스템 관리자의 조직 생성과 조직원 할당·해제
+- 개인·조직 프로젝트와 이중 membership 검사
+- 조직이 없는 사용자의 개인 프로젝트 생성과 생성자 Project Admin 자동 지정
+- 조직원의 조직 프로젝트 생성과 공유 대상 제한
 - Project Admin, Developer, Viewer 초대·수락과 역할 관리
 - 저장소 경로 allowlist
 - 감사 로그 기반
@@ -2448,31 +2573,160 @@ COSIGHT_LOG_LEVEL
 - 주요 사용자 경로의 E2E 테스트가 통과한다.
 - 사용자 문서 또는 시스템 관리자 문서가 갱신된다.
 
-## 22. 개발 시작 전 확정할 항목
+## 22. MVP 설계 확인 체크리스트
 
-다음 항목은 M0 종료 전 확정해야 한다.
+이 체크리스트는 설계 상태의 기준 목록이다. `[x]`는 이 문서 또는 `DESIGN.md`에서 방향과 범위가 확정된 항목, `[ ]`는 구현 전에 추가 확인 또는 산출물이 필요한 항목을 의미한다.
 
-1. 사내 Keycloak realm, client와 callback URL
-2. `cosight-system-admin` 역할의 관리 주체
-3. 저장소 마운트 허용 루트와 운영 배포 방식
-4. 사내 Vault 또는 Secret Manager 제품과 접근 방식
-5. MVP에서 연결할 OpenAI-compatible Provider와 데이터 처리 지역
-6. 기본 RPM, TPM, 동시 요청과 일·월 토큰 한도
-7. 감사 로그와 LLM 사용량의 실제 보존 기간
-8. 기준 샘플 저장소와 성능 측정 장비
-9. Vue·TypeScript Analyzer Helper의 실행·배포 방식
-10. TypeScript HTTP client wrapper의 프로젝트별 인식 설정 형식
+### 22.1 확정된 사항
 
-미확정 항목은 기본값을 코드에 하드코딩하지 않고 환경 설정 또는 Adapter interface 뒤에 둔다.
+- [x] 제품 구현 스택: Go, Gin, PostgreSQL, Redis, Vue 3, TypeScript와 Naive UI
+- [x] 분석 대상: Go, TypeScript와 Vue SFC
+- [x] MVP 제외 분석: JavaScript, JSX, SQL과 SCSS 의미 분석
+- [x] 인증: Keycloak OIDC Authorization Code Flow와 서버 세션
+- [x] 시스템 관리자: Keycloak `cosight-system-admin` client role
+- [x] 조직 관리: System Administrator의 조직 생성과 사용자 할당·해제
+- [x] 프로젝트 범위: 개인 프로젝트와 조직 프로젝트
+- [x] 조직이 없는 active 사용자의 개인 프로젝트 생성
+- [x] 조직 프로젝트의 조직원 제한과 project membership 이중 검사
+- [x] 프로젝트 역할: Project Admin, Developer, Viewer
+- [x] 프로젝트 생성자의 Project Admin 자동 지정
+- [x] 초대 수락·거절·재전송·취소와 마지막 관리자 보호 원칙
+- [x] 주요 페이지, 메뉴, 권한과 페이지별 컴포넌트 구조
+- [x] Go·Gin, TypeScript, Vue SFC 분석 대상과 기본 분석 방식
+- [x] node·edge·evidence·warning과 index version 기반 결과 관리 방향
+- [x] 분석 결과 API 목록과 프런트 소비 컴포넌트 대응
+- [x] 시각화: Cytoscape.js, ELK, Monaco Editor, ECharts와 Naive UI
+- [x] 구조·흐름·영향 모드와 그래프 상호작용 원칙
+- [x] LLM Gateway, 프로젝트 할당량과 근거 검증 기본 방향
+- [x] 감사, 데이터 보존, 관측과 테스트의 상위 요구사항
 
-## 23. 후속 문서
+### 22.2 외부 환경 확인 사항
 
-M0~M1에서 다음 문서를 추가한다.
+다음 항목은 설계 문서만으로 결정할 수 없으며 M0 종료 전 실제 운영 환경 담당자와 확인해야 한다.
 
-- `docs/api/openapi.yaml`: REST 및 SSE API 계약
-- `docs/database/schema.md`: 테이블, 제약과 migration 정책
-- `docs/analysis/protocol.md`: 언어 분석 Helper 프로토콜
-- `docs/analysis/graph-schema.md`: 노드, 엣지와 근거 enum
-- `docs/security/threat-model.md`: 인증, 저장소, LLM과 관리자 위협 모델
-- `docs/operations/runbook.md`: 장애, 백업, 자격증명 교체와 Rate limit 운영
-- `docs/testing/acceptance.md`: 샘플 저장소와 기대 분석 결과
+- [x] Keycloak Realm `cosight`, Callback URL `https://cosight.wasming.com`, 권장 Client ID `cosight-web`, post-logout URL `https://cosight.wasming.com`과 claim mapping(`sub`, `email`, `name`, client roles) 확정
+- [x] `cosight-system-admin` 역할은 Keycloak 관리자가 부여·회수하며 Cosight UI에서는 변경하지 않음
+- [x] Cosight 사용자는 최초 로그인 시 생성·갱신하고, 시스템 관리자는 로그인 이력이 있는 active 사용자를 조직에 할당
+- [x] 배포 방식은 Kubernetes이며 저장소는 허용된 read-only mount와 Git URL을 지원
+- [x] Kubernetes Linux/amd64, `CGO_ENABLED=0` 기본, build tag는 프로젝트 설정, private Go module은 `GOPRIVATE`와 read-only deploy credential 사용
+- [x] Node.js 22 LTS, pnpm 10 workspace 기반 monorepo 지원을 기본으로 확정(npm/yarn lockfile은 분석 입력으로 인식)
+- [x] HashiCorp Vault와 Kubernetes workload identity 인증을 기본으로 사용하고 90일 이내 rotation 적용
+- [x] MVP Provider는 OpenAI-compatible DeepSeek, 제품 표시 모델은 `deepseek v1 flash`로 확정(정확한 API model ID·region은 연결 시험에서 검증)
+- [x] AI 기능은 프로젝트별 명시적 활성화이며 활성화 시 필요한 최소 소스 문맥의 외부 전송 허용
+- [x] 기본 한도는 System Administrator가 변경 가능한 설정값으로 관리(초기값: 60 RPM, 1,000,000 TPM, 동시 4건, 일 5,000,000·월 100,000,000 token)
+- [x] 프로젝트 삭제 시 해당 프로젝트 귀속 데이터 전체를 영구 삭제; 유지 중 기본 보존 기간은 15.3 적용
+- [x] 초대는 이메일 발송 없이 기존 active 사용자를 대상으로 한 인앱 방식
+- [x] 실제 샘플 저장소 확보 전 Go·Gin, TypeScript와 Vue 최소 golden fixture를 자체 제작
+- [x] Vue·TypeScript Analyzer Helper는 Worker Pod sidecar로 배포하고 localhost IPC만 허용
+- [x] Axios·fetch 외 HTTP wrapper는 프로젝트 설정의 declarative JSON 규칙(method·URL·argument 위치)으로 등록
+
+미확정 값은 코드에 하드코딩하지 않고 환경 설정, project setting 또는 Adapter interface 뒤에 둔다.
+
+## 23. 추가 설계 및 누락 체크리스트
+
+### 23.1 구현 전 필수 상세 설계
+
+- [ ] 모든 REST·SSE endpoint의 요청·응답·오류·pagination schema 작성
+- [ ] mutation endpoint의 idempotency, 중복 요청과 낙관적 잠금 규칙 작성
+- [ ] PostgreSQL 실제 DDL, FK, partial unique index, `ON DELETE`, RLS와 migration 작성
+- [ ] 개인 프로젝트의 nullable `organization_id`가 집계·감사·캐시에 적용되는 규칙 검증
+- [ ] 역할-세부 권한 전체 매트릭스와 API별 권한 테스트 표 작성
+- [ ] Go Worker와 Vue·TypeScript Helper의 IPC schema와 protocol 작성
+- [ ] analyzer timeout, 취소, crash restart, 최대 payload와 version 호환 규칙 작성
+- [ ] node·edge·metadata·evidence·warning의 기계 검증 가능한 JSON schema 작성
+- [x] 인덱싱 queue, lease, heartbeat, retry, cancellation과 중복 실행 방지 설계
+- [ ] 활성 index version 교체, 실패 복구와 대용량 결과 정리 절차 설계
+- [x] 인덱싱 기준 Git commit과 코드 조회 시점이 일치하는 repository snapshot 방식 설계
+- [x] 통합 검색 저장 방식, tokenizer, ranking, prefix·오타 검색과 권한 필터 설계
+- [x] 그래프 cycle 제거, 중복 경로, depth, aggregate node와 query timeout 설계
+- [ ] 조직 비활성화와 저장소 연결 해제의 상태·복구·정리 절차 설계(프로젝트 삭제는 비복구 영구 삭제로 확정)
+- [x] 조직원 해제 시 대체 관리자 지정과 프로젝트 membership 회수 transaction 설계
+- [x] LLM Provider adapter가 지원할 endpoint, streaming event와 token usage 정규화 계약 작성
+- [ ] Redis Rate limit Lua script 또는 원자 연산과 장애 시 동작 설계
+- [ ] 프런트 API client 생성, query cache, Pinia 경계와 오류 처리 규칙 작성
+- [ ] CSRF, CSP, session rotation, SSRF, symlink race와 Secret 노출 위협 통제 설계
+- [ ] 백업·복구, migration rollback, 장애 대응과 자격증명 교체 절차 설계
+
+### 23.2 현재 API·화면에서 보완할 내용
+
+- [ ] 조직 생성·수정·사용자 할당·해제 API의 상세 payload와 오류 코드
+- [ ] 조직 status 변경이 조직 프로젝트 접근과 실행 중 작업에 미치는 영향
+- [x] 초대는 기존 active 사용자를 대상으로 한 인앱 방식이며 이메일 발송은 MVP 제외
+- [ ] 저장소 경로 연결 검증 전용 API와 검증 결과 schema
+- [ ] 전체·증분 재인덱싱 요청 mode와 이미 실행 중인 작업의 충돌 응답
+- [ ] 프로젝트 최근 활동과 개요 통계 API
+- [ ] 프로젝트 삭제 job과 UI 진행 상태 API
+- [ ] 탐색 세션 복제와 공유 범위 변경의 구체 API
+- [ ] 시스템 관리 조직 화면의 사용자 검색 결과와 개인정보 노출 범위
+- [ ] 차트 색상, typography, spacing, node icon과 반응형 breakpoint의 design token
+- [ ] 핵심 화면 wireframe 및 빈 상태·오류 상태 prototype
+
+### 23.3 분석 검증에서 보완할 내용
+
+- [ ] Go build tag·interface dispatch·reflection 경계 fixture
+- [ ] TypeScript project reference·path alias·overload·dynamic property fixture
+- [ ] Vue `<script setup>`·template directive·dynamic component·source map fixture
+- [ ] Gin 중첩 Group, Middleware 순서와 동일 path pattern fixture
+- [ ] Axios·fetch·custom wrapper URL 정규화 fixture
+- [ ] 파일 rename, 삭제와 analyzer version 변경의 증분 분석 fixture
+- [ ] 언어별 precision·recall·source range 성공률의 합격 기준
+- [ ] 노드 500개·edge 1,500개 그래프와 기준 저장소 인덱싱 성능 기준
+
+## 24. 설계 산출물 체크리스트
+
+| 상태 | 산출물 | 목적 | 완료 기준 | 필요 시점 |
+| --- | --- | --- | --- | --- |
+| [x] | `DESIGN.md` | 제품 방향과 장기 설계 | 제품·보안·분석·LLM 방향이 연결됨 | 완료 |
+| [x] | `MVP_SPEC.md` | MVP 범위와 구현 기준 | 범위, 화면, 권한, 분석, API 목록과 인수 조건 정의 | 완료 |
+| [x] | `docs/decisions/*.md` | 주요 ADR | 조직·snapshot·queue·검색·LLM 선택의 근거와 대안 기록 | M0 |
+| [ ] 초안 | `docs/api/openapi.yaml` | REST·SSE 계약 | 모든 endpoint와 오류 example이 schema validation 통과 | M0~M1 |
+| [ ] 초안 | `docs/database/schema.md` | 실제 DB schema | DDL, index, FK, RLS, migration·rollback 포함 | M0~M1 |
+| [ ] 초안 | `docs/security/rbac-matrix.md` | 역할과 API 권한 | 모든 endpoint가 역할·세부 권한·scope와 매핑됨 | M1 |
+| [ ] 초안 | `docs/analysis/protocol.md` | 분석 Helper IPC | request·response·timeout·cancel·version·오류 계약 포함 | M0~M2 |
+| [ ] 초안 | `docs/analysis/graph-schema.md` | 코드 그래프 schema | enum과 metadata JSON schema 및 예제 검증 통과 | M0~M2 |
+| [ ] 초안 | `docs/analysis/golden-fixtures.md` | 언어별 기대 결과 | 대표 fixture와 node·edge·evidence expected output 포함 | M2~M3 |
+| [x] | `docs/architecture/jobs.md` | 작업 실행 모델 | 상태 전이, lease, retry, cancel과 복구 절차 포함 | M0~M2 |
+| [x] | `docs/architecture/repository-snapshot.md` | 코드·인덱스 일관성 | commit pinning과 stale file 처리 방식 확정 | M0~M2 |
+| [x] | `docs/architecture/search-graph-query.md` | 검색·그래프 질의 | 저장·ranking·traversal·limit·aggregate 알고리즘 확정 | M2~M4 |
+| [ ] 초안 | `docs/frontend/design-system.md` | UI 구현 기준 | token, component variant, breakpoint와 접근성 규칙 포함 | M0~M4 |
+| [ ] 초안 | `docs/frontend/wireframes.md` | 핵심 화면 흐름 | 정상·빈 상태·오류·권한 없음 화면 검토 완료 | M0~M1 |
+| [ ] 초안 | `docs/security/threat-model.md` | 위협 모델 | 인증·조직·저장소·LLM·관리자 위협과 통제 추적 | M0~M1 |
+| [ ] 초안 | `docs/operations/deployment.md` | 배포 구조 | API·Worker·Helper·DB·Redis·Secret 배치와 설정 포함 | M0 |
+| [ ] 초안 | `docs/operations/runbook.md` | 운영 절차 | 장애, 백업, 복구, migration, secret rotation 포함 | M5~M7 |
+| [ ] 초안 | `docs/testing/acceptance.md` | MVP 인수 기준 | 역할·분석·그래프·LLM E2E와 재현 절차 포함 | M1~M7 |
+
+## 25. 설계 완료 판정 체크리스트
+
+### 25.1 M0 시작 조건
+
+- [x] MVP 제품 범위와 제외 범위가 정의되어 있다.
+- [x] 기술 스택과 실행 단위가 정의되어 있다.
+- [x] 개인·조직 프로젝트와 권한 방향이 정의되어 있다.
+- [x] 분석 대상 언어와 시각화 라이브러리가 정의되어 있다.
+- [ ] 외부 환경 확인 사항의 담당자와 완료 예정일이 지정되어 있다.
+
+### 25.2 M1 기능 구현 시작 조건
+
+- [ ] OpenAPI의 인증·조직·프로젝트·초대 계약이 확정되어 있다.
+- [ ] 조직·프로젝트·membership DB migration이 작성되어 있다.
+- [ ] RBAC matrix와 권한 통합 테스트 목록이 확정되어 있다.
+- [ ] CSRF와 세션 보안 정책이 threat model에 반영되어 있다.
+- [ ] 핵심 화면 wireframe이 제품 검토를 통과했다.
+
+### 25.3 M2 분석 구현 시작 조건
+
+- [ ] graph schema와 analyzer protocol이 schema validation 가능한 상태다.
+- [ ] repository snapshot과 job orchestration 방식이 ADR로 확정되어 있다.
+- [ ] Go·TypeScript·Vue golden fixture와 expected result가 준비되어 있다.
+- [ ] 기준 저장소 크기와 분석 성능 목표가 확정되어 있다.
+
+### 25.4 전체 설계 완료 조건
+
+- [ ] 22.2의 외부 환경 확인 항목이 모두 확정되어 있다.
+- [ ] 23.1의 필수 상세 설계가 모두 산출물에 반영되어 있다.
+- [ ] 23.2의 API·화면 보완 항목이 OpenAPI와 wireframe에 반영되어 있다.
+- [ ] 23.3의 분석 검증 항목이 golden fixture와 acceptance 문서에 반영되어 있다.
+- [ ] 24장의 필수 산출물이 해당 milestone 전에 승인되어 있다.
+- [ ] 문서 간 역할, scope, enum, endpoint와 상태 전이에 충돌이 없다.
+
+현재 판정은 **M0 골격과 기술 검증 시작 가능, M1 이후 전체 기능 구현을 위한 상세 설계는 진행 중**이다.
