@@ -110,7 +110,8 @@ Vue와 TypeScript 분석 Helper는 Node 런타임을 사용할 수 있으나 외
 #### 인증과 권한
 
 - Keycloak Authorization Code Flow
-- Gin 서버 세션과 HttpOnly 쿠키
+- Vue `keycloak-js`, PKCE S256과 Keycloak Access Token
+- 백엔드 환경변수 기반 공개 Keycloak 설정 API
 - 시스템 관리자 Keycloak client role
 - 시스템 관리자의 조직 생성과 조직원 할당·해제
 - 로그인 사용자별 프로젝트 생성
@@ -939,14 +940,14 @@ AuditLogPage
 
 ### 8.1 OIDC 흐름
 
-MVP Keycloak Realm은 `cosight`이며 운영 Callback URL은 사용자 제공값인 `https://cosight.wasming.com`이다. 권장 Client ID는 `cosight-web`이며 실제 발급값은 Kubernetes 배포 설정으로 주입한다. 외부 Callback이 서비스 루트이므로 Ingress 또는 BFF root handler가 authorization code를 내부 `/api/v1/auth/callback` 처리기로 전달한다.
+MVP Keycloak Realm은 `cosight`이며 운영 Redirect URI는 사용자 제공값인 `https://cosight.wasming.com`이다. 권장 Client ID는 `cosight-web`이며 실제 설정은 백엔드 환경변수로 주입한다. 프런트는 `/api/v1/public/auth-config`에서 URL, Realm, Client ID와 Scope만 조회한다.
 
-1. 브라우저가 `GET /api/v1/auth/login`을 호출한다.
-2. Gin이 `state`, `nonce`와 PKCE 값을 생성하고 Keycloak으로 리다이렉트한다.
-3. Keycloak 인증 후 외부 Callback `https://cosight.wasming.com`으로 돌아오고 Ingress/BFF가 내부 `/api/v1/auth/callback` 처리기로 전달한다.
-4. Gin이 code를 교환하고 issuer, audience, signature, nonce와 만료를 검증한다.
-5. 사용자 정보를 upsert하고 서버 세션을 만든다.
-6. 브라우저에는 Secure, HttpOnly, SameSite 쿠키만 전달한다.
+1. Vue SPA가 `GET /api/v1/public/auth-config`로 공개 Keycloak 설정을 조회한다.
+2. `keycloak-js`가 `state`, `nonce`와 PKCE S256 값을 생성해 Keycloak 로그인 UI로 리다이렉트한다.
+3. Keycloak 인증 후 `https://cosight.wasming.com`으로 돌아와 code를 token으로 교환한다.
+4. SPA는 Access Token을 메모리에만 보관하고 보호 API에 `Authorization: Bearer`로 전달한다.
+5. Gin은 OIDC discovery와 JWKS로 issuer, signature, expiry, audience 또는 `azp`를 검증한다.
+6. 검증된 claim을 기준으로 사용자를 upsert하고 프로젝트 권한을 별도로 확인한다.
 
 ### 8.2 MVP 역할
 
@@ -1456,10 +1457,8 @@ audit_events(
 
 | Method | Path | 설명 |
 | --- | --- | --- |
-| GET | `/auth/login` | Keycloak 로그인 시작 |
-| GET | `/auth/callback` | OIDC callback |
-| POST | `/auth/logout` | 로컬 및 Keycloak 로그아웃 |
-| GET | `/auth/me` | 사용자, 시스템 역할과 프로젝트 요약 |
+| GET | `/public/auth-config` | 공개 | 백엔드 환경변수에서 공개 Keycloak 설정 조회 |
+| GET | `/me` | 유효한 Keycloak Bearer Token | 사용자, 시스템 역할과 프로젝트 요약 |
 
 ### 10.3 프로젝트
 
@@ -2262,7 +2261,7 @@ MVP는 화면 내 상태만 제공한다.
 - 조직 프로젝트의 초대·역할 변경 대상은 현재 조직원으로 제한한다.
 - 조직에서 사용자를 해제할 때 관련 프로젝트 membership과 pending 초대를 원자적으로 회수한다.
 - 프로젝트 생성자에게 Project Admin membership을 트랜잭션으로 부여한다.
-- 인앱 초대는 대상 사용자 ID를 서버 세션과 대조하고 단일 수락과 7일 만료를 강제한다.
+- 인앱 초대는 대상 사용자 ID를 검증된 Access Token의 `sub`와 대조하고 단일 수락과 7일 만료를 강제한다.
 - 마지막 Project Admin의 강등과 제거를 금지한다.
 - 시스템 관리 API는 Keycloak client role을 확인한다.
 - System Administrator의 조직 관리 권한만으로 프로젝트 코드 접근을 허용하지 않는다.
@@ -2481,7 +2480,7 @@ COSIGHT_LOG_LEVEL
 
 ### M1. 인증·권한·프로젝트
 
-- Keycloak OIDC와 서버 세션
+- Keycloak OIDC, `keycloak-js` PKCE와 API Bearer Token 검증
 - System Administrator 역할
 - 시스템 관리자의 조직 생성과 조직원 할당·해제
 - 개인·조직 프로젝트와 이중 membership 검사
@@ -2582,7 +2581,7 @@ COSIGHT_LOG_LEVEL
 - [x] 제품 구현 스택: Go, Gin, PostgreSQL, Redis, Vue 3, TypeScript와 Naive UI
 - [x] 분석 대상: Go, TypeScript와 Vue SFC
 - [x] MVP 제외 분석: JavaScript, JSX, SQL과 SCSS 의미 분석
-- [x] 인증: Keycloak OIDC Authorization Code Flow와 서버 세션
+- [x] 인증: Vue `keycloak-js` Authorization Code Flow + PKCE와 Keycloak Bearer Access Token
 - [x] 시스템 관리자: Keycloak `cosight-system-admin` client role
 - [x] 조직 관리: System Administrator의 조직 생성과 사용자 할당·해제
 - [x] 프로젝트 범위: 개인 프로젝트와 조직 프로젝트

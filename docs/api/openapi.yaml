@@ -6,7 +6,7 @@ info:
 servers:
   - url: /api/v1
 security:
-  - cookieAuth: []
+  - bearerAuth: []
 tags:
   - name: Auth
   - name: Projects
@@ -17,28 +17,15 @@ tags:
   - name: Jobs
   - name: System
 paths:
-  /auth/login:
+  /public/auth-config:
     get:
       tags: [Auth]
       security: []
-      summary: Start Keycloak login
+      summary: Get public Keycloak settings sourced from backend environment variables
       responses:
-        "302": {description: Redirect to Keycloak}
-  /auth/callback:
-    get:
-      tags: [Auth]
-      security: []
-      summary: Complete OIDC callback
-      responses:
-        "302": {description: Redirect to the validated application return path}
-        "400": {$ref: "#/components/responses/BadRequest"}
-  /auth/logout:
-    post:
-      tags: [Auth]
-      summary: Revoke the local session
-      responses:
-        "204": {description: Logged out}
-  /auth/me:
+        "200":
+          description: Public SPA authentication settings; never contains a client secret
+  /me:
     get:
       tags: [Auth]
       summary: Get current user and role summary
@@ -472,10 +459,10 @@ paths:
 
 components:
   securitySchemes:
-    cookieAuth:
-      type: apiKey
-      in: cookie
-      name: cosight_session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     ProjectId: {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     OrganizationId: {name: organizationId, in: path, required: true, schema: {type: string, format: uuid}}

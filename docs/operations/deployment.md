@@ -1,6 +1,6 @@
 # MVP deployment
 
-배포 대상은 Kubernetes다. 운영 서비스 기준 URL과 OIDC Callback은 `https://cosight.wasming.com`, Keycloak Realm은 `cosight`, 권장 client ID는 `cosight-web`이다. Ingress/BFF는 root Callback 요청을 내부 `/api/v1/auth/callback` 처리기로 전달한다.
+배포 대상은 Kubernetes다. 운영 서비스 기준 URL과 SPA Redirect URI는 `https://cosight.wasming.com`, Keycloak Realm은 `cosight`, 권장 public client ID는 `cosight-web`이다. Keycloak 공개 설정은 API Pod 환경변수로 주입하고 SPA는 `/api/v1/public/auth-config`에서 조회한다.
 
 ## 실행 단위
 

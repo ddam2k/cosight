@@ -1830,32 +1830,33 @@ MVP의 사용자 인증은 사내 Keycloak과 OpenID Connect(OIDC)로 연동한�
 ```mermaid
 sequenceDiagram
     participant User as 사용자 브라우저
-    participant Gin as Cosight Gin 서버
+    participant Vue as Cosight Vue SPA
+    participant Gin as Cosight Gin API
     participant KC as 사내 Keycloak
     participant DB as PostgreSQL
 
-    User->>Gin: 로그인 요청
-    Gin->>KC: OIDC Authorization Code 요청
+    Vue->>Gin: 공개 Keycloak 설정 조회
+    Gin-->>Vue: URL, Realm, Client ID, Scope
+    Vue->>KC: Authorization Code + PKCE 요청
     KC->>User: 사내 로그인 및 추가 인증
-    KC->>Gin: Authorization Code 반환
-    Gin->>KC: Code와 Token 교환
-    Gin->>KC: ID Token 서명·발급자·대상 검증
-    Gin->>DB: 사용자 및 서버 세션 생성·갱신
-    Gin->>User: HttpOnly 세션 쿠키 발급
+    KC->>Vue: Authorization Code 반환
+    Vue->>KC: Code와 Token 교환
+    Vue->>Gin: API 요청 + Bearer Access Token
+    Gin->>KC: Discovery/JWKS 기반 Token 검증
+    Gin->>DB: 사용자 생성·갱신
 ```
 
-Vue SPA가 Keycloak 토큰을 브라우저의 `localStorage`에 장기 보관하지 않도록 Gin이 OIDC 클라이언트와 세션 백엔드 역할을 담당한다. 브라우저에는 예측 불가능한 세션 식별자만 쿠키로 전달한다.
+Vue SPA는 `keycloak-js`로 Authorization Code Flow와 PKCE S256을 수행한다. Access Token은 메모리에만 유지하고 모든 보호 API에 Bearer Token으로 전달한다. `localStorage`, `sessionStorage`와 일반 쿠키에는 토큰을 저장하지 않는다.
 
 #### OIDC 설정 원칙
 
-- Authorization Code Flow를 사용한다.
-- Keycloak Realm은 `cosight`, 운영 Callback URL은 사용자 제공값인 `https://cosight.wasming.com`으로 한다. 권장 client ID는 `cosight-web`, post-logout URL은 `https://cosight.wasming.com`이다. 외부 Callback은 Ingress 또는 BFF root handler에서 내부 callback 처리기로 전달하며 issuer와 실제 client secret은 배포 환경 설정으로 관리한다.
+- Authorization Code Flow와 PKCE S256을 사용한다.
+- Keycloak Realm은 `cosight`, 운영 Redirect URI와 post-logout URL은 `https://cosight.wasming.com`으로 한다. 권장 client ID는 `cosight-web`이며 Public Client로 구성한다.
+- Keycloak URL, Realm, Client ID와 Scope는 백엔드 환경변수로 관리하고 `/api/v1/public/auth-config`에서 공개 값만 프런트에 제공한다. Client Secret과 관리자 자격증명은 이 응답에 포함하지 않는다.
 - Gin 서버는 Keycloak discovery 문서와 JWKS를 사용해 토큰을 검증한다.
-- `issuer`, `audience`, 서명, 만료 시각, `state` 및 `nonce`를 검증한다.
-- 세션 쿠키에 `HttpOnly`, `Secure`, 적절한 `SameSite` 정책을 적용한다.
-- 로그아웃 시 Cosight 서버 세션을 폐기하고 필요한 경우 Keycloak 로그아웃도 수행한다.
-- Refresh Token을 저장해야 한다면 서버 측에서 암호화하고 로그에 노출하지 않는다.
-- Keycloak 장애 중에는 기존 세션 정책에 따라 제한적으로 동작하되 신규 로그인은 실패로 처리한다.
+- API는 `issuer`, `audience` 또는 `azp`, 서명과 만료 시각을 검증한다.
+- 로그아웃은 Keycloak end-session 흐름을 사용하며 SPA의 메모리 토큰을 폐기한다.
+- Keycloak 장애 중에는 신규 로그인과 토큰 갱신이 실패하며, 아직 유효하고 로컬 JWKS cache로 검증되는 요청만 제한적으로 처리할 수 있다.
 
 #### 사용자 동기화
 
@@ -2031,7 +2032,7 @@ Gin request
   → Repository
 ```
 
-- 인증 미들웨어는 서버 세션과 Keycloak 사용자 신원을 확인한다.
+- 인증 미들웨어는 Keycloak Bearer Access Token과 사용자 신원을 확인한다.
 - 프로젝트 컨텍스트 계층은 URL이나 요청 본문의 조직 및 프로젝트 값을 그대로 신뢰하지 않고 현재 사용자 소속을 확인한다.
 - 권한 서비스는 사용자, 세부 권한, 대상 리소스와 소유권을 평가한다.
 - 서비스 계층은 실제 리소스를 읽거나 변경하기 직전에 권한을 다시 확인한다.
@@ -2599,7 +2600,7 @@ max_output_tokens
 stream
 ```
 
-사용자 ID, 조직 ID, 권한, 실제 Provider, API Key, 최종 할당량과 코드 반출 허용 여부는 서버 세션과 정책으로 결정하며 클라이언트 입력을 신뢰하지 않는다.
+사용자 ID와 Keycloak 역할은 검증된 Access Token claim에서 가져오고, 조직 ID, 프로젝트 권한, 실제 Provider, API Key, 최종 할당량과 코드 반출 허용 여부는 서버의 DB와 정책으로 결정하며 클라이언트 입력을 신뢰하지 않는다.
 
 ### 16.12 라우팅과 장애 대응
 
@@ -3130,7 +3131,7 @@ permission_version
 - 통계 차트: Apache ECharts + vue-echarts
 - 제품 형태: 웹 애플리케이션
 - 인증: 사내 Keycloak OIDC
-- 세션: Gin 서버 측 세션과 HttpOnly 쿠키
+- 인증 상태: Keycloak Access Token을 SPA 메모리에 보관하고 API에서 Bearer 검증
 - 권한: 조직 및 프로젝트 범위의 고정 RBAC
 - LLM 연동: 중앙 LLM Gateway와 OpenAI-compatible Provider 어댑터
 - 시스템 관리자: Keycloak `cosight-system-admin` 클라이언트 역할

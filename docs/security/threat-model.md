@@ -2,14 +2,14 @@
 
 ## 자산과 경계
 
-자산은 source code, graph metadata, session, invitation token, LLM credential, prompt context와 audit log다. 경계는 Browser↔API, API↔Keycloak, API↔DB/Redis/Vault/LLM, Worker↔repository/Helper다.
+자산은 source code, graph metadata, Keycloak token, invitation, LLM credential, prompt context와 audit log다. 경계는 Browser↔Keycloak, Browser↔API, API↔Keycloak/JWKS, API↔DB/Redis/Vault/LLM, Worker↔repository/Helper다.
 
 ## 위협과 통제
 
 | 위협 | 통제 | 검증 |
 | --- | --- | --- |
-| CSRF mutation | SameSite=Lax, CSRF token, Origin allowlist | cross-origin POST E2E |
-| session theft/fixation | Secure HttpOnly cookie, login 시 rotation, logout revoke | old cookie 재사용 |
+| Token 탈취 | 메모리 전용 보관, CSP, 로그 redaction, 짧은 Access Token 수명 | storage·log token scan |
+| Token 위조·오용 | issuer, signature, expiry, audience/azp 검증 | 다른 realm·client token 거부 |
 | horizontal escalation | project ID마다 membership 재검사, RLS | 다른 project UUID test |
 | 조직 밖 공유 | 조직+프로젝트 이중 membership | 비조직원 초대·접근 test |
 | 관리자 권한 오용 | Keycloak role, code access 분리, audit | admin code read 거부 |
