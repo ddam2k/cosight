@@ -59,4 +59,15 @@ func TestMeReturnsVerifiedClaims(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
 	}
+	var body struct {
+		RealmRoles    []string         `json:"realmRoles"`
+		ClientRoles   []string         `json:"clientRoles"`
+		Organizations []map[string]any `json:"organizations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.RealmRoles == nil || body.ClientRoles == nil || body.Organizations == nil {
+		t.Fatalf("collection fields must not be null: %s", w.Body.String())
+	}
 }

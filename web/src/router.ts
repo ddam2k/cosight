@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import PageContent from './pages/PageContent.vue'
+import ProjectCreate from './pages/ProjectCreate.vue'
 
 const page = (name: string, path: string, title: string, description: string, section: string) => ({
   name,
@@ -12,9 +13,10 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     page('projects', '/', '내 프로젝트', '개인 프로젝트와 소속 조직의 프로젝트를 확인합니다.', '프로젝트'),
-    page('project-new', '/projects/new', '프로젝트 만들기', '저장소를 연결하고 첫 분석을 준비합니다.', '프로젝트'),
+    { name: 'project-new', path: '/projects/new', component: ProjectCreate, meta: { title: '프로젝트 만들기', description: '저장소를 연결하고 첫 분석을 준비합니다.', section: '프로젝트' } },
     page('invitations', '/invitations', '내 초대', '대기 중인 프로젝트 초대를 확인하고 참여합니다.', '프로젝트'),
     page('project-overview', '/projects/current', '프로젝트 개요', 'cosight-platform의 분석 상태와 최근 변경입니다.', '현재 프로젝트'),
+    page('project-detail', '/projects/:projectId', '프로젝트 개요', '프로젝트의 분석 상태와 최근 변경입니다.', '현재 프로젝트'),
     page('project-explore', '/projects/current/explore', '코드 탐색', '코드 구조와 실행 흐름을 그래프로 탐색합니다.', '현재 프로젝트'),
     page('project-explorations', '/projects/current/explorations', '저장된 탐색', '저장하거나 공유한 코드 탐색 세션입니다.', '현재 프로젝트'),
     page('project-members', '/projects/current/members', '구성원', '프로젝트 구성원과 역할을 관리합니다.', '현재 프로젝트'),

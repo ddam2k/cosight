@@ -3,7 +3,7 @@ import { onMounted, ref } from 'vue'
 import { apiFetch } from './api'
 import { initializeAuth, logout } from './auth'
 import AppShell from './components/AppShell.vue'
-import type { CurrentUser } from './types'
+import { normalizeCurrentUser, type CurrentUser, type CurrentUserResponse } from './types'
 
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const message = ref('Keycloak 연결 정보를 확인하고 있습니다…')
@@ -17,7 +17,8 @@ onMounted(async () => {
   try {
     message.value = 'Keycloak 로그인 상태를 확인하고 있습니다…'
     await initializeAuth()
-    user.value = await apiFetch<CurrentUser>('/api/v1/me')
+    const response = await apiFetch<CurrentUserResponse>('/api/v1/me')
+    user.value = normalizeCurrentUser(response)
     state.value = 'ready'
   } catch (error) {
     message.value = error instanceof Error ? error.message : '로그인 초기화에 실패했습니다.'

@@ -33,11 +33,19 @@ func NewRouter(cfg config.Config, verifier auth.TokenVerifier) http.Handler {
 			"email":             claims.Email,
 			"displayName":       claims.Name,
 			"preferredUsername": claims.PreferredUsername,
-			"realmRoles":        claims.RealmAccess.Roles,
-			"clientRoles":       claims.ResourceAccess[cfg.Keycloak.ClientID].Roles,
+			"realmRoles":        nonNilStrings(claims.RealmAccess.Roles),
+			"clientRoles":       nonNilStrings(claims.ResourceAccess[cfg.Keycloak.ClientID].Roles),
+			"organizations":     []gin.H{},
 		})
 	})
 	return r
+}
+
+func nonNilStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }
 
 func cors(allowedOrigins []string) gin.HandlerFunc {
