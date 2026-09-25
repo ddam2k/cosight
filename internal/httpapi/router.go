@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -9,7 +10,7 @@ import (
 	"github.com/wasming/cosight/internal/config"
 )
 
-func NewRouter(cfg config.Config, verifier auth.TokenVerifier) http.Handler {
+func NewRouter(cfg config.Config, verifier auth.TokenVerifier, dependencies Dependencies) http.Handler {
 	r := gin.New()
 	r.Use(gin.Recovery(), cors(cfg.AllowedOrigins))
 
@@ -26,19 +27,25 @@ func NewRouter(cfg config.Config, verifier auth.TokenVerifier) http.Handler {
 
 	authorized := r.Group("/api/v1")
 	authorized.Use(auth.Middleware(verifier))
-	authorized.GET("/me", func(c *gin.Context) {
-		claims := c.MustGet(auth.ClaimsContextKey).(auth.Claims)
-		c.JSON(http.StatusOK, gin.H{
-			"id":                claims.Subject,
-			"email":             claims.Email,
-			"displayName":       claims.Name,
-			"preferredUsername": claims.PreferredUsername,
-			"realmRoles":        nonNilStrings(claims.RealmAccess.Roles),
-			"clientRoles":       nonNilStrings(claims.ResourceAccess[cfg.Keycloak.ClientID].Roles),
-			"organizations":     []gin.H{},
-		})
-	})
+	users := userHandler{issuer: cfg.Keycloak.Issuer(), clientID: cfg.Keycloak.ClientID, repository: dependencies.Users}
+	projects := projectHandler{users: users, repository: dependencies.Projects}
+	authorized.GET("/me", users.current)
+	authorized.GET("/projects", projects.list)
+	authorized.POST("/projects", projects.create)
 	return r
+}
+
+func writeError(c *gin.Context, status int, code, message string, fieldErrors map[string]string) {
+	details := gin.H{}
+	if len(fieldErrors) > 0 {
+		details["fieldErrors"] = fieldErrors
+	}
+	c.JSON(status, gin.H{"error": gin.H{"code": code, "message": message, "details": details}})
+}
+
+func internalError(c *gin.Context, err error) {
+	slog.ErrorContext(c.Request.Context(), "request failed", "error", err, "method", c.Request.Method, "path", c.Request.URL.Path)
+	writeError(c, http.StatusInternalServerError, "INTERNAL_ERROR", "요청을 처리하지 못했습니다.", nil)
 }
 
 func nonNilStrings(values []string) []string {

@@ -44,6 +44,14 @@ required_variables=(
   COSIGHT_KEYCLOAK_CLIENT_ID
 )
 
+if [[ -z "${COSIGHT_POSTGRES_URL:-}" ]]; then
+  required_variables+=(
+    COSIGHT_POSTGRES_USER
+    COSIGHT_POSTGRES_PASSWORD
+    COSIGHT_POSTGRES_DATABASE
+  )
+fi
+
 for variable_name in "${required_variables[@]}"; do
   if [[ -z "${!variable_name:-}" ]]; then
     echo "필수 환경변수가 비어 있습니다: ${variable_name}" >&2

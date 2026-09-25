@@ -12,7 +12,9 @@ import (
 
 	"github.com/wasming/cosight/internal/auth"
 	"github.com/wasming/cosight/internal/config"
+	"github.com/wasming/cosight/internal/database"
 	"github.com/wasming/cosight/internal/httpapi"
+	"github.com/wasming/cosight/internal/repository"
 )
 
 func main() {
@@ -24,6 +26,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	databaseContext, cancelDatabase := context.WithTimeout(ctx, 10*time.Second)
+	db, err := database.OpenPostgreSQL(databaseContext, cfg.PostgreSQL)
+	cancelDatabase()
+	if err != nil {
+		slog.Error("initialize PostgreSQL", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()
 
 	verifier, err := auth.NewVerifier(ctx, cfg.Keycloak.Issuer(), cfg.Keycloak.ClientID)
 	if err != nil {
@@ -32,8 +42,11 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddress,
-		Handler:           httpapi.NewRouter(cfg, verifier),
+		Addr: cfg.HTTPAddress,
+		Handler: httpapi.NewRouter(cfg, verifier, httpapi.Dependencies{
+			Users:    repository.NewSQLXUserRepository(db),
+			Projects: repository.NewSQLXProjectRepository(db),
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}

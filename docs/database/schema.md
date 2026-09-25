@@ -125,6 +125,13 @@ CREATE UNIQUE INDEX projects_personal_slug_uq
   ON projects (created_by, slug)
   WHERE scope = 'personal' AND deleted_at IS NULL;
 
+CREATE TABLE project_exclude_patterns (
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  position integer NOT NULL CHECK (position >= 0),
+  pattern text NOT NULL CHECK (pattern <> ''),
+  PRIMARY KEY (project_id, position)
+);
+
 CREATE TABLE project_members (
   project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
